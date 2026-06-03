@@ -14,7 +14,7 @@ from utils.data import (
 )
 from utils.nl_query import ask_cortex_analyst
 
-st.set_page_config(page_title="Order Detail | Affinity Insights", page_icon="📊",
+st.set_page_config(page_title="Order Detail | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
 
 # Auth guard
@@ -85,11 +85,11 @@ with st.sidebar:
     st.markdown(f"### {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
     st.markdown("---")
-    if st.button("🏠 Home", use_container_width=True, key="nav_home"):
+    if st.button("Home", use_container_width=True, key="nav_home"):
         st.switch_page("app.py")
-    if st.button("⚖️ Manufacturer Compare", use_container_width=True, key="nav_compare"):
+    if st.button("Manufacturer Compare", use_container_width=True, key="nav_compare"):
         st.switch_page("pages/2_Manufacturer_Compare.py")
-    if st.button("📅 Period Compare", use_container_width=True, key="nav_period"):
+    if st.button("Period Compare", use_container_width=True, key="nav_period"):
         st.switch_page("pages/3_Period_Compare.py")
     st.markdown("---")
 
@@ -173,7 +173,7 @@ with st.sidebar:
 # MAIN CONTENT
 # =====================================================
 
-st.title("📊 Order Detail Analytics")
+st.title("Order Detail Analytics")
 subtitle_parts = [f"{selected_year} YTD"]
 if manufacturer_filter:
     subtitle_parts.append(f"Mfr: {', '.join(manufacturer_filter[:3])}")
@@ -197,7 +197,7 @@ col5.metric("Avg Line Value", f"${kpis['avg_order']:,.2f}")
 st.markdown("---")
 
 # Monthly Breakdown
-st.markdown("### 📅 Monthly Sales Breakdown")
+st.markdown("### Monthly Sales Breakdown")
 monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter,
                                    parent_filter, category_filter, selected_year, store_name)
 

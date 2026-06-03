@@ -12,7 +12,7 @@ from utils.data import (
     get_available_years, get_distributor_parents, ORDER_VIEW, PARSE_DATE, _build_where,
 )
 
-st.set_page_config(page_title="Manufacturer Compare | Affinity Insights", page_icon="⚖️",
+st.set_page_config(page_title="Manufacturer Compare | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
 
 if "user" not in st.session_state:
@@ -42,11 +42,11 @@ with st.sidebar:
     st.markdown(f"### {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
     st.markdown("---")
-    if st.button("🏠 Home", use_container_width=True, key="nav_home"):
+    if st.button("Home", use_container_width=True, key="nav_home"):
         st.switch_page("app.py")
-    if st.button("📊 Order Detail", use_container_width=True, key="nav_order"):
+    if st.button("Order Detail", use_container_width=True, key="nav_order"):
         st.switch_page("pages/1_Order_Detail.py")
-    if st.button("📅 Period Compare", use_container_width=True, key="nav_period"):
+    if st.button("Period Compare", use_container_width=True, key="nav_period"):
         st.switch_page("pages/3_Period_Compare.py")
     st.markdown("---")
 
@@ -69,7 +69,7 @@ with st.sidebar:
         st.rerun()
 
 # Main content
-st.title("⚖️ Manufacturer Comparison")
+st.title("Manufacturer Comparison")
 st.caption(f"{selected_year} YTD | {get_access_display(user)}")
 
 if len(selected_mfrs) < 2:

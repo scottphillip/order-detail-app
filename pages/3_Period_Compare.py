@@ -14,7 +14,7 @@ from utils.data import (
     get_available_years, ORDER_VIEW, PARSE_DATE, _build_where,
 )
 
-st.set_page_config(page_title="Period Compare | Affinity Insights", page_icon="📅",
+st.set_page_config(page_title="Period Compare | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
 
 if "user" not in st.session_state:
@@ -75,11 +75,11 @@ with st.sidebar:
     st.markdown(f"### {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
     st.markdown("---")
-    if st.button("🏠 Home", use_container_width=True, key="nav_home"):
+    if st.button("Home", use_container_width=True, key="nav_home"):
         st.switch_page("app.py")
-    if st.button("📊 Order Detail", use_container_width=True, key="nav_order"):
+    if st.button("Order Detail", use_container_width=True, key="nav_order"):
         st.switch_page("pages/1_Order_Detail.py")
-    if st.button("⚖️ Manufacturer Compare", use_container_width=True, key="nav_compare"):
+    if st.button("Manufacturer Compare", use_container_width=True, key="nav_compare"):
         st.switch_page("pages/2_Manufacturer_Compare.py")
     st.markdown("---")
 
@@ -133,7 +133,7 @@ label_a = get_period_label(year_a, period_type_a, sub_a)
 label_b = get_period_label(year_b, period_type_b, sub_b)
 
 # Main content
-st.title("📅 Period Comparison")
+st.title("Period Comparison")
 st.caption(f"Comparing **{label_a}** vs **{label_b}** | {get_access_display(user)}")
 
 if year_a == year_b and period_type_a == period_type_b and sub_a == sub_b:

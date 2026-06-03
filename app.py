@@ -12,7 +12,7 @@ from utils.data import get_kpis, get_available_years
 # Page config
 st.set_page_config(
     page_title="Affinity Insights & Analytics",
-    page_icon="🔷",
+    page_icon="🍴",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -101,11 +101,11 @@ with st.sidebar:
     st.caption(get_access_display(user))
     st.markdown("---")
     st.markdown("#### Navigation")
-    if st.button("📊 Order Detail", use_container_width=True):
+    if st.button("Order Detail", use_container_width=True):
         st.switch_page("pages/1_Order_Detail.py")
-    if st.button("⚖️ Manufacturer Compare", use_container_width=True):
+    if st.button("Manufacturer Compare", use_container_width=True):
         st.switch_page("pages/2_Manufacturer_Compare.py")
-    if st.button("📅 Period Compare", use_container_width=True):
+    if st.button("Period Compare", use_container_width=True):
         st.switch_page("pages/3_Period_Compare.py")
     st.markdown("---")
     if st.button("Sign Out"):
@@ -144,7 +144,7 @@ with col1:
     st.markdown("""
     <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
                 color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">📊 Order Detail</h3>
+        <h3 style="color: #F5921E; margin-top: 0;">Order Detail</h3>
         <p style="color: #CCCCCC;">Explore YTD sales by manufacturer, distributor parent, 
         territory, and category. Drill into individual store performance.</p>
     </div>
@@ -156,7 +156,7 @@ with col2:
     st.markdown("""
     <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
                 color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">⚖️ Manufacturer Compare</h3>
+        <h3 style="color: #F5921E; margin-top: 0;">Manufacturer Compare</h3>
         <p style="color: #CCCCCC;">Compare two or more manufacturers side by side — 
         dollars, cases, commission, and monthly trends overlaid.</p>
     </div>
@@ -168,7 +168,7 @@ with col3:
     st.markdown("""
     <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
                 color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">📅 Period Compare</h3>
+        <h3 style="color: #F5921E; margin-top: 0;">Period Compare</h3>
         <p style="color: #CCCCCC;">Compare sales across time periods — year over year, 
         month over month, or custom date ranges with change indicators.</p>
     </div>
