@@ -40,8 +40,15 @@ if "user" not in st.session_state:
     st.markdown("")
     col_l, col_c, col_r = st.columns([1, 2, 1])
     with col_c:
-        st.markdown("## 🔷 Affinity Insights & Analytics")
-        st.markdown("##### Your Sales Intelligence Hub")
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div style="background: #2D2D2D; padding: 20px 30px; border-radius: 12px; display: inline-block;">
+                <span style="color: #F5921E; font-size: 28px; font-weight: bold;">AFFINITY</span>
+                <span style="color: #FFFFFF; font-size: 28px; font-weight: 300;"> GROUP</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("##### Insights & Analytics")
         st.markdown("---")
         st.markdown("**Sign in with your Affinity email to get started.**")
 
@@ -65,6 +72,18 @@ if "user" not in st.session_state:
 
         st.markdown("")
         st.caption("Powered by Snowflake + Cortex AI")
+        st.markdown("""
+        <style>
+            .stButton > button[kind="primary"] {
+                background-color: #F5921E;
+                border-color: #F5921E;
+            }
+            .stButton > button[kind="primary"]:hover {
+                background-color: #D47D17;
+                border-color: #D47D17;
+            }
+        </style>
+        """, unsafe_allow_html=True)
     st.stop()
 
 
@@ -94,7 +113,13 @@ with st.sidebar:
         st.rerun()
 
 # Header
-st.markdown("## 🔷 Affinity Insights & Analytics")
+st.markdown("""
+<div style="background: #2D2D2D; padding: 15px 25px; border-radius: 8px; margin-bottom: 15px;">
+    <span style="color: #F5921E; font-size: 22px; font-weight: bold;">AFFINITY</span>
+    <span style="color: #FFFFFF; font-size: 22px; font-weight: 300;"> GROUP</span>
+    <span style="color: #AAAAAA; font-size: 14px; margin-left: 15px;">Insights & Analytics</span>
+</div>
+""", unsafe_allow_html=True)
 st.markdown(f"Welcome back, **{user['DISPLAY_NAME']}**")
 st.markdown("---")
 
@@ -117,10 +142,10 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #1B4F72 0%, #2E86C1 100%); 
-                padding: 30px; border-radius: 12px; color: white; min-height: 200px;">
-        <h3 style="color: white; margin-top: 0;">📊 Order Detail</h3>
-        <p style="color: #D6EAF8;">Explore YTD sales by manufacturer, distributor parent, 
+    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
+                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
+        <h3 style="color: #F5921E; margin-top: 0;">📊 Order Detail</h3>
+        <p style="color: #CCCCCC;">Explore YTD sales by manufacturer, distributor parent, 
         territory, and category. Drill into individual store performance.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -129,10 +154,10 @@ with col1:
 
 with col2:
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #148F77 0%, #1ABC9C 100%); 
-                padding: 30px; border-radius: 12px; color: white; min-height: 200px;">
-        <h3 style="color: white; margin-top: 0;">⚖️ Manufacturer Compare</h3>
-        <p style="color: #D5F5E3;">Compare two or more manufacturers side by side — 
+    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
+                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
+        <h3 style="color: #F5921E; margin-top: 0;">⚖️ Manufacturer Compare</h3>
+        <p style="color: #CCCCCC;">Compare two or more manufacturers side by side — 
         dollars, cases, commission, and monthly trends overlaid.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -141,10 +166,10 @@ with col2:
 
 with col3:
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #6C3483 0%, #A569BD 100%); 
-                padding: 30px; border-radius: 12px; color: white; min-height: 200px;">
-        <h3 style="color: white; margin-top: 0;">📅 Period Compare</h3>
-        <p style="color: #E8DAEF;">Compare sales across time periods — year over year, 
+    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
+                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
+        <h3 style="color: #F5921E; margin-top: 0;">📅 Period Compare</h3>
+        <p style="color: #CCCCCC;">Compare sales across time periods — year over year, 
         month over month, or custom date ranges with change indicators.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -152,4 +177,4 @@ with col3:
         st.switch_page("pages/3_Period_Compare.py")
 
 st.markdown("---")
-st.caption("Affinity Insights & Analytics | Powered by Snowflake + Cortex AI")
+st.caption("Affinity Group | Insights & Analytics | Powered by Snowflake + Cortex AI")
