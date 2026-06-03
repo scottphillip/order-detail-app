@@ -17,7 +17,6 @@ st.set_page_config(page_title="Manufacturer Compare | Affinity Insights", page_i
 
 if "user" not in st.session_state:
     st.warning("Please sign in from the home page.")
-    st.page_link("app.py", label="Go to Home", icon="🏠")
     st.stop()
 
 
@@ -43,10 +42,12 @@ with st.sidebar:
     st.markdown(f"### {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
     st.markdown("---")
-    st.page_link("app.py", label="Home", icon="🏠")
-    st.page_link("pages/1_Order_Detail.py", label="Order Detail", icon="📊")
-    st.page_link("pages/2_Manufacturer_Compare.py", label="Manufacturer Compare", icon="⚖️")
-    st.page_link("pages/3_Period_Compare.py", label="Period Compare", icon="📅")
+    if st.button("🏠 Home", use_container_width=True, key="nav_home"):
+        st.switch_page("app.py")
+    if st.button("📊 Order Detail", use_container_width=True, key="nav_order"):
+        st.switch_page("pages/1_Order_Detail.py")
+    if st.button("📅 Period Compare", use_container_width=True, key="nav_period"):
+        st.switch_page("pages/3_Period_Compare.py")
     st.markdown("---")
 
     available_years = get_available_years(conn, territory_filter)

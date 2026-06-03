@@ -82,10 +82,12 @@ with st.sidebar:
     st.caption(get_access_display(user))
     st.markdown("---")
     st.markdown("#### Navigation")
-    st.page_link("app.py", label="Home", icon="🏠")
-    st.page_link("pages/1_Order_Detail.py", label="Order Detail", icon="📊")
-    st.page_link("pages/2_Manufacturer_Compare.py", label="Manufacturer Compare", icon="⚖️")
-    st.page_link("pages/3_Period_Compare.py", label="Period Compare", icon="📅")
+    if st.button("📊 Order Detail", use_container_width=True):
+        st.switch_page("pages/1_Order_Detail.py")
+    if st.button("⚖️ Manufacturer Compare", use_container_width=True):
+        st.switch_page("pages/2_Manufacturer_Compare.py")
+    if st.button("📅 Period Compare", use_container_width=True):
+        st.switch_page("pages/3_Period_Compare.py")
     st.markdown("---")
     if st.button("Sign Out"):
         del st.session_state.user
@@ -122,7 +124,8 @@ with col1:
         territory, and category. Drill into individual store performance.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/1_Order_Detail.py", label="Open Order Detail →", use_container_width=True)
+    if st.button("Open Order Detail →", use_container_width=True, key="card_order"):
+        st.switch_page("pages/1_Order_Detail.py")
 
 with col2:
     st.markdown("""
@@ -133,7 +136,8 @@ with col2:
         dollars, cases, commission, and monthly trends overlaid.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/2_Manufacturer_Compare.py", label="Open Comparison →", use_container_width=True)
+    if st.button("Open Comparison →", use_container_width=True, key="card_compare"):
+        st.switch_page("pages/2_Manufacturer_Compare.py")
 
 with col3:
     st.markdown("""
@@ -144,7 +148,8 @@ with col3:
         month over month, or custom date ranges with change indicators.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/3_Period_Compare.py", label="Open Period Compare →", use_container_width=True)
+    if st.button("Open Period Compare →", use_container_width=True, key="card_period"):
+        st.switch_page("pages/3_Period_Compare.py")
 
 st.markdown("---")
 st.caption("Affinity Insights & Analytics | Powered by Snowflake + Cortex AI")
