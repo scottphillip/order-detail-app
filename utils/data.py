@@ -21,13 +21,17 @@ PFG_PARENTS = [
 
 def _build_where(territory_filter: str, manufacturer_filter: list = None,
                  parent_filter: str = None, category_filter: list = None,
-                 year_filter: int = None) -> str:
-    """Build WHERE clause from filters. Defaults to current year if year_filter not specified."""
+                 year_filter: int = None, month_start: int = None,
+                 month_end: int = None) -> str:
+    """Build WHERE clause from filters. Defaults to current year if year_filter not specified.
+    month_start/month_end filter by MONTH(date) BETWEEN start AND end."""
     clauses = [territory_filter]
     if year_filter:
         clauses.append(f"YEAR({PARSE_DATE}) = {year_filter}")
     else:
         clauses.append(f"YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())")
+    if month_start and month_end:
+        clauses.append(f"MONTH({PARSE_DATE}) BETWEEN {month_start} AND {month_end}")
     if manufacturer_filter:
         mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
         clauses.append(f"MANUFACTURERNAME IN ({mfr_list})")
@@ -85,9 +89,11 @@ def get_categories_for_manufacturers(conn, territory_filter: str,
 
 def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
              parent_filter: str = None, category_filter: list = None,
-             year: int = None, store_name: str = None) -> dict:
+             year: int = None, store_name: str = None,
+             month_start: int = None, month_end: int = None) -> dict:
     """Get KPI metrics for the filtered data (defaults to current year)."""
-    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year,
+                         month_start=month_start, month_end=month_end)
     where = _add_store_filter(where, store_name)
     query = f"""
         SELECT 
@@ -132,9 +138,11 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
 
 def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list = None,
                           parent_filter: str = None, category_filter: list = None,
-                          year: int = None, store_name: str = None) -> pd.DataFrame:
+                          year: int = None, store_name: str = None,
+                          month_start: int = None, month_end: int = None) -> pd.DataFrame:
     """YTD month-by-month sales breakdown for selected year."""
-    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year,
+                         month_start=month_start, month_end=month_end)
     where = _add_store_filter(where, store_name)
     query = f"""
         SELECT 
