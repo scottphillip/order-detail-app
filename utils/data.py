@@ -81,6 +81,27 @@ def get_available_years(conn, territory_filter: str) -> list:
     return [int(y) for y in df["YR"].dropna().tolist()]
 
 
+def get_max_month(conn, territory_filter: str, year: int) -> int:
+    """Get the latest month with data for a given year."""
+    query = f"""
+        SELECT MAX(MONTH({PARSE_DATE})) AS max_mo
+        FROM {ORDER_VIEW}
+        WHERE {territory_filter}
+          AND YEAR({PARSE_DATE}) = {year}
+          AND {PARSE_DATE} IS NOT NULL
+    """
+    df = conn.cursor().execute(query).fetch_pandas_all()
+    if df.empty or df.iloc[0]["MAX_MO"] is None:
+        return 12
+    import math
+    val = df.iloc[0]["MAX_MO"]
+    try:
+        v = int(float(val))
+        return v if v > 0 else 12
+    except (TypeError, ValueError):
+        return 12
+
+
 def get_categories_for_manufacturers(conn, territory_filter: str,
                                      manufacturer_filter: list) -> list:
     """Get item categories available for selected manufacturers (current year)."""

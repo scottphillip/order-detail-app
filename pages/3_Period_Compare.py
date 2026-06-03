@@ -11,7 +11,7 @@ from datetime import datetime
 from utils.auth import get_access_filter, get_access_display
 from utils.data import (
     get_kpis, get_monthly_breakdown, get_filter_options,
-    get_available_years, ORDER_VIEW, PARSE_DATE, _build_where,
+    get_available_years, get_max_month, ORDER_VIEW, PARSE_DATE, _build_where,
 )
 
 st.set_page_config(page_title="Period Compare | Affinity Insights", page_icon="🍴",
@@ -128,13 +128,30 @@ with st.sidebar:
 month_start_a, month_end_a = get_period_range(period_type_a, sub_a)
 month_start_b, month_end_b = get_period_range(period_type_b, sub_b)
 
+# For "Full Year" comparisons, limit KPIs to overlapping months only
+# (e.g., if 2026 only has Jan-May, compare only Jan-May of 2025 too)
+kpi_month_start_a, kpi_month_end_a = month_start_a, month_end_a
+kpi_month_start_b, kpi_month_end_b = month_start_b, month_end_b
+
+if period_type_a == "Full Year" and period_type_b == "Full Year":
+    max_month_a = get_max_month(conn, territory_filter, year_a)
+    max_month_b = get_max_month(conn, territory_filter, year_b)
+    overlap_end = min(max_month_a, max_month_b)
+    kpi_month_start_a, kpi_month_end_a = 1, overlap_end
+    kpi_month_start_b, kpi_month_end_b = 1, overlap_end
+
 # Labels
 label_a = get_period_label(year_a, period_type_a, sub_a)
 label_b = get_period_label(year_b, period_type_b, sub_b)
 
 # Main content
 st.title("Period Comparison")
-st.caption(f"Comparing **{label_a}** vs **{label_b}** | {get_access_display(user)}")
+if period_type_a == "Full Year" and period_type_b == "Full Year" and kpi_month_end_a < 12:
+    import calendar
+    month_name = calendar.month_abbr[kpi_month_end_a]
+    st.caption(f"Comparing **{label_a}** vs **{label_b}** (Jan-{month_name} only) | {get_access_display(user)}")
+else:
+    st.caption(f"Comparing **{label_a}** vs **{label_b}** | {get_access_display(user)}")
 
 if year_a == year_b and period_type_a == period_type_b and sub_a == sub_b:
     st.warning("Select two different periods to compare.")
@@ -146,9 +163,9 @@ st.markdown("---")
 st.markdown("### Key Metrics Comparison")
 
 kpis_a = get_kpis(conn, territory_filter, manufacturer_filter=manufacturer_filter or None,
-                  year=year_a, month_start=month_start_a, month_end=month_end_a)
+                  year=year_a, month_start=kpi_month_start_a, month_end=kpi_month_end_a)
 kpis_b = get_kpis(conn, territory_filter, manufacturer_filter=manufacturer_filter or None,
-                  year=year_b, month_start=month_start_b, month_end=month_end_b)
+                  year=year_b, month_start=kpi_month_start_b, month_end=kpi_month_end_b)
 
 
 def calc_delta(a, b):
@@ -224,9 +241,9 @@ st.markdown("---")
 st.markdown("### Top Manufacturers — Period Change")
 
 where_a = _build_where(territory_filter, manufacturer_filter=manufacturer_filter or None,
-                       year_filter=year_a, month_start=month_start_a, month_end=month_end_a)
+                       year_filter=year_a, month_start=kpi_month_start_a, month_end=kpi_month_end_a)
 where_b = _build_where(territory_filter, manufacturer_filter=manufacturer_filter or None,
-                       year_filter=year_b, month_start=month_start_b, month_end=month_end_b)
+                       year_filter=year_b, month_start=kpi_month_start_b, month_end=kpi_month_end_b)
 
 query = f"""
     WITH period_a AS (
