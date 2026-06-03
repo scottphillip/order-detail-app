@@ -19,13 +19,21 @@ PFG_PARENTS = [
 ]
 
 
+# Max dollar value per line item — filters out corrupted rows with misaligned columns
+# (e.g., $1.9B single line items that are clearly data import errors)
+MAX_LINE_DOLLARS = 1000000
+
+
 def _build_where(territory_filter: str, manufacturer_filter: list = None,
                  parent_filter: str = None, category_filter: list = None,
                  year_filter: int = None, month_start: int = None,
                  month_end: int = None) -> str:
     """Build WHERE clause from filters. Defaults to current year if year_filter not specified.
-    month_start/month_end filter by MONTH(date) BETWEEN start AND end."""
+    month_start/month_end filter by MONTH(date) BETWEEN start AND end.
+    Includes data quality filter to exclude corrupt dollar values."""
     clauses = [territory_filter]
+    # Data quality: exclude rows with unreasonably large dollar values (column misalignment)
+    clauses.append(f"(TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})")
     if year_filter:
         clauses.append(f"YEAR({PARSE_DATE}) = {year_filter}")
     else:
