@@ -14,7 +14,7 @@ from utils.data import (
     get_kpis, get_monthly_breakdown, get_top_manufacturers, get_sales_trend,
     get_distributor_parents, get_parent_stores, get_parent_monthly,
     get_pfg_summary, get_dist_codes_for_parent, get_dist_codes_for_pfg,
-    get_filter_options, PFG_PARENTS,
+    get_filter_options, get_categories_for_manufacturers, PFG_PARENTS,
 )
 from utils.nl_query import ask_cortex_analyst
 
@@ -148,6 +148,18 @@ with st.sidebar:
         placeholder="All manufacturers"
     )
 
+    # Category filter (appears when manufacturer selected)
+    category_filter = []
+    if manufacturer_filter:
+        categories = get_categories_for_manufacturers(conn, territory_filter, manufacturer_filter)
+        if categories:
+            category_filter = st.multiselect(
+                "Item Category",
+                options=categories,
+                default=[],
+                placeholder="All categories"
+            )
+
     # Distributor hierarchy filter: Parent → Sub-distributor → Location
     st.markdown("#### Distributor")
 
@@ -240,6 +252,8 @@ st.title("📊 Order Detail Analytics")
 subtitle_parts = [f"{datetime.now().year} YTD"]
 if manufacturer_filter:
     subtitle_parts.append(f"Mfr: {', '.join(manufacturer_filter[:3])}")
+if category_filter:
+    subtitle_parts.append(f"Cat: {', '.join(category_filter[:3])}")
 if selected_parent_name:
     subtitle_parts.append(f"Dist: {selected_parent_name}")
 st.caption(" | ".join(subtitle_parts) + f" | {user['DEPARTMENT']} - {user.get('OFFICE_LOCATION', 'All')}")
@@ -248,7 +262,7 @@ st.caption(" | ".join(subtitle_parts) + f" | {user['DEPARTMENT']} - {user.get('O
 # KPI ROW
 # =====================================================
 
-kpis = get_kpis(conn, territory_filter, manufacturer_filter, distributor_codes)
+kpis = get_kpis(conn, territory_filter, manufacturer_filter, distributor_codes, category_filter)
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("YTD Sales", f"${kpis['dollars']:,.0f}")
@@ -264,7 +278,7 @@ st.markdown("---")
 
 st.markdown("### 📅 Monthly Sales Breakdown")
 
-monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter, distributor_codes)
+monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter, distributor_codes, category_filter)
 
 if not monthly_df.empty:
     fig = px.bar(
@@ -333,7 +347,7 @@ chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
     st.markdown("#### Top 10 Manufacturers")
-    mfr_df = get_top_manufacturers(conn, territory_filter, distributor_codes)
+    mfr_df = get_top_manufacturers(conn, territory_filter, distributor_codes, category_filter)
     if not mfr_df.empty:
         fig = px.bar(
             mfr_df, x="Manufacturer", y="Total Dollars",
