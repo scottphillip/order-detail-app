@@ -1,13 +1,12 @@
 """
 Data query utilities for Snowflake order detail analytics.
-All queries are parameterized with the user's territory filter.
+All queries use VW_MYORDERDETAIL_ALL which has PARENT_DISTRIBUTOR pre-joined.
 Includes monthly breakdown, manufacturer drill-down, and distributor hierarchy.
 """
 import pandas as pd
 
-# Views
-ORDER_VIEW = "DB_PROD_RAW.SCH_CRM_SHAREPOINT.VW_ORDER_DETAIL_APPENDING_WEEKLY"
-DIST_REF = "DB_PROD_RAW.SCH_RAW_SHAREPOINT.TB_REF_DISTRIBUTORLIST"
+# Main order view — has PARENT_DISTRIBUTOR already joined
+ORDER_VIEW = "DB_NXT.SCH_NXT.VW_MYORDERDETAIL_ALL"
 
 # PFG super-parent: Performance Food Group encompasses these parent distributors
 PFG_PARENTS = [
@@ -18,7 +17,7 @@ PFG_PARENTS = [
 
 
 def _build_where(territory_filter: str, manufacturer_filter: list = None,
-                 distributor_codes: list = None, category_filter: list = None,
+                 parent_filter: str = None, category_filter: list = None,
                  year_filter: int = None) -> str:
     """Build WHERE clause from filters. Defaults to current year if year_filter not specified."""
     clauses = [territory_filter]
@@ -29,13 +28,27 @@ def _build_where(territory_filter: str, manufacturer_filter: list = None,
     if manufacturer_filter:
         mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
         clauses.append(f"MANUFACTURERNAME IN ({mfr_list})")
-    if distributor_codes:
-        dist_list = ", ".join([f"'{d.replace(chr(39), chr(39)+chr(39))}'" for d in distributor_codes])
-        clauses.append(f"DISTRIBUTORCODE IN ({dist_list})")
+    if parent_filter:
+        if parent_filter == "Independent":
+            clauses.append("(PARENT_DISTRIBUTOR IS NULL OR PARENT_DISTRIBUTOR = '')")
+        elif parent_filter == "PFG":
+            pfg_list = ", ".join([f"'{p}'" for p in PFG_PARENTS])
+            clauses.append(f"PARENT_DISTRIBUTOR IN ({pfg_list})")
+        else:
+            safe = parent_filter.replace("'", "''")
+            clauses.append(f"PARENT_DISTRIBUTOR = '{safe}'")
     if category_filter:
         cat_list = ", ".join([f"'{c.replace(chr(39), chr(39)+chr(39))}'" for c in category_filter])
         clauses.append(f"CATEGORY IN ({cat_list})")
     return " AND ".join(clauses)
+
+
+def _add_store_filter(where: str, store_name: str = None) -> str:
+    """Add individual store filter if specified."""
+    if store_name:
+        safe = store_name.replace("'", "''")
+        return f"{where} AND DISTRIBUTORNAME = '{safe}'"
+    return where
 
 
 def get_available_years(conn, territory_filter: str) -> list:
@@ -47,7 +60,7 @@ def get_available_years(conn, territory_filter: str) -> list:
         ORDER BY yr DESC
     """
     df = conn.cursor().execute(query).fetch_pandas_all()
-    return df["YR"].tolist() if not df.empty else []
+    return [int(y) for y in df["YR"].tolist()] if not df.empty else []
 
 
 def get_categories_for_manufacturers(conn, territory_filter: str,
@@ -65,15 +78,17 @@ def get_categories_for_manufacturers(conn, territory_filter: str,
 
 
 def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
-             distributor_codes: list = None, category_filter: list = None,
-             year: int = None) -> dict:
+             parent_filter: str = None, category_filter: list = None,
+             year: int = None, store_name: str = None) -> dict:
     """Get KPI metrics for the filtered data (defaults to current year)."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
+    where = _add_store_filter(where, store_name)
     query = f"""
         SELECT 
             COALESCE(SUM(TRY_TO_DOUBLE(DOLLARS)), 0) AS total_dollars,
             COUNT(DISTINCT ORDERNUMBER) AS total_orders,
             COALESCE(SUM(TRY_TO_DOUBLE(QTY)), 0) AS total_qty,
+            COALESCE(SUM(TRY_TO_DOUBLE(COMM)), 0) AS total_comm,
             CASE WHEN COUNT(*) > 0 
                  THEN COALESCE(SUM(TRY_TO_DOUBLE(DOLLARS)), 0) / COUNT(*)
                  ELSE 0 END AS avg_line_value
@@ -82,27 +97,30 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
     """
     df = conn.cursor().execute(query).fetch_pandas_all()
     if df.empty:
-        return {"dollars": 0, "orders": 0, "qty": 0, "avg_order": 0}
+        return {"dollars": 0, "orders": 0, "qty": 0, "comm": 0, "avg_order": 0}
     row = df.iloc[0]
     return {
         "dollars": float(row["TOTAL_DOLLARS"] or 0),
         "orders": int(row["TOTAL_ORDERS"] or 0),
         "qty": float(row["TOTAL_QTY"] or 0),
+        "comm": float(row["TOTAL_COMM"] or 0),
         "avg_order": float(row["AVG_LINE_VALUE"] or 0),
     }
 
 
 def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list = None,
-                          distributor_codes: list = None, category_filter: list = None,
-                          year: int = None) -> pd.DataFrame:
+                          parent_filter: str = None, category_filter: list = None,
+                          year: int = None, store_name: str = None) -> pd.DataFrame:
     """YTD month-by-month sales breakdown for selected year."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
+    where = _add_store_filter(where, store_name)
     query = f"""
         SELECT 
             DATE_TRUNC('MONTH', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month",
             MONTHNAME(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month Name",
             SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
             SUM(TRY_TO_DOUBLE(QTY)) AS "Total Qty",
+            SUM(TRY_TO_DOUBLE(COMM)) AS "Total Comm",
             COUNT(DISTINCT ORDERNUMBER) AS "Orders"
         FROM {ORDER_VIEW}
         WHERE {where}
@@ -113,10 +131,12 @@ def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list
     return conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_top_manufacturers(conn, territory_filter: str, distributor_codes: list = None,
-                          category_filter: list = None, year: int = None, limit: int = 10) -> pd.DataFrame:
+def get_top_manufacturers(conn, territory_filter: str, parent_filter: str = None,
+                          category_filter: list = None, year: int = None,
+                          limit: int = 10) -> pd.DataFrame:
     """Get top manufacturers by dollars (selected year)."""
-    where = _build_where(territory_filter, distributor_codes=distributor_codes, category_filter=category_filter, year_filter=year)
+    where = _build_where(territory_filter, parent_filter=parent_filter,
+                         category_filter=category_filter, year_filter=year)
     query = f"""
         SELECT 
             MANUFACTURERNAME AS "Manufacturer",
@@ -134,10 +154,10 @@ def get_top_manufacturers(conn, territory_filter: str, distributor_codes: list =
 
 
 def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = None,
-                    distributor_codes: list = None, category_filter: list = None,
+                    parent_filter: str = None, category_filter: list = None,
                     year: int = None) -> pd.DataFrame:
     """Get weekly sales trend (selected year)."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
     query = f"""
         SELECT 
             DATE_TRUNC('WEEK', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Week",
@@ -153,35 +173,21 @@ def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = Non
 
 
 # =============================================================================
-# DISTRIBUTOR HIERARCHY
+# DISTRIBUTOR HIERARCHY (uses PARENT_DISTRIBUTOR column directly)
 # =============================================================================
 
-def get_distributor_parents(conn, territory_filter: str, manufacturer_filter: list = None) -> pd.DataFrame:
-    """
-    Get distributor parents with rollup totals.
-    Joins order data to TB_REF_DISTRIBUTORLIST to get ParentDistributor.
-    Returns parent-level aggregates sorted by dollars DESC.
-    """
-    mfr_clause = ""
-    if manufacturer_filter:
-        mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
-        mfr_clause = f"AND o.MANUFACTURERNAME IN ({mfr_list})"
-
+def get_distributor_parents(conn, territory_filter: str, manufacturer_filter: list = None,
+                            year: int = None) -> pd.DataFrame:
+    """Get distributor parents with rollup totals using PARENT_DISTRIBUTOR column."""
+    where = _build_where(territory_filter, manufacturer_filter, year_filter=year)
     query = f"""
         SELECT 
-            COALESCE(d."ParentDistributor", 'Independent') AS "Parent",
-            SUM(TRY_TO_DOUBLE(o.DOLLARS)) AS "Total Dollars",
-            COUNT(DISTINCT o.ORDERNUMBER) AS "Orders",
-            COUNT(DISTINCT o.DISTRIBUTORCODE) AS "Store Count"
-        FROM {ORDER_VIEW} o
-        LEFT JOIN (
-            SELECT DISTINCT "DistCode", "ParentDistributor"
-            FROM {DIST_REF}
-            WHERE "DistCode" IS NOT NULL AND "DistCode" != ''
-        ) d ON o.DISTRIBUTORCODE = d."DistCode"
-        WHERE {territory_filter}
-          AND YEAR(TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())
-          {mfr_clause}
+            COALESCE(NULLIF(PARENT_DISTRIBUTOR, ''), 'Independent') AS "Parent",
+            SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
+            COUNT(DISTINCT ORDERNUMBER) AS "Orders",
+            COUNT(DISTINCT DISTRIBUTORNAME) AS "Store Count"
+        FROM {ORDER_VIEW}
+        WHERE {where}
         GROUP BY "Parent"
         ORDER BY "Total Dollars" DESC
     """
@@ -189,109 +195,61 @@ def get_distributor_parents(conn, territory_filter: str, manufacturer_filter: li
 
 
 def get_parent_stores(conn, territory_filter: str, parent_name: str,
-                      manufacturer_filter: list = None) -> pd.DataFrame:
+                      manufacturer_filter: list = None, year: int = None) -> pd.DataFrame:
     """Get individual store breakdown under a parent distributor."""
-    mfr_clause = ""
-    if manufacturer_filter:
-        mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
-        mfr_clause = f"AND o.MANUFACTURERNAME IN ({mfr_list})"
-
-    safe_parent = parent_name.replace("'", "''")
-
-    if parent_name == "Independent":
-        parent_condition = '(d."ParentDistributor" IS NULL OR d."ParentDistributor" = \'\')'
-    else:
-        parent_condition = f'd."ParentDistributor" = \'{safe_parent}\''
-
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter=parent_name, year_filter=year)
     query = f"""
         SELECT 
-            o.DISTRIBUTORNAME AS "Store",
-            o.DISTRIBUTORCODE AS "Code",
-            SUM(TRY_TO_DOUBLE(o.DOLLARS)) AS "Total Dollars",
-            SUM(TRY_TO_DOUBLE(o.QTY)) AS "Total Qty",
-            COUNT(DISTINCT o.ORDERNUMBER) AS "Orders"
-        FROM {ORDER_VIEW} o
-        LEFT JOIN (
-            SELECT DISTINCT "DistCode", "ParentDistributor"
-            FROM {DIST_REF}
-            WHERE "DistCode" IS NOT NULL AND "DistCode" != ''
-        ) d ON o.DISTRIBUTORCODE = d."DistCode"
-        WHERE {territory_filter}
-          AND YEAR(TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())
-          AND {parent_condition}
-          {mfr_clause}
-        GROUP BY "Store", "Code"
+            DISTRIBUTORNAME AS "Store",
+            SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
+            SUM(TRY_TO_DOUBLE(QTY)) AS "Total Qty",
+            SUM(TRY_TO_DOUBLE(COMM)) AS "Total Comm",
+            COUNT(DISTINCT ORDERNUMBER) AS "Orders"
+        FROM {ORDER_VIEW}
+        WHERE {where}
+        GROUP BY "Store"
         ORDER BY "Total Dollars" DESC
     """
     return conn.cursor().execute(query).fetch_pandas_all()
 
 
 def get_parent_monthly(conn, territory_filter: str, parent_name: str,
-                       manufacturer_filter: list = None) -> pd.DataFrame:
+                       manufacturer_filter: list = None, year: int = None) -> pd.DataFrame:
     """Monthly breakdown for a parent distributor's stores."""
-    mfr_clause = ""
-    if manufacturer_filter:
-        mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
-        mfr_clause = f"AND o.MANUFACTURERNAME IN ({mfr_list})"
-
-    safe_parent = parent_name.replace("'", "''")
-
-    if parent_name == "Independent":
-        parent_condition = '(d."ParentDistributor" IS NULL OR d."ParentDistributor" = \'\')'
-    else:
-        parent_condition = f'd."ParentDistributor" = \'{safe_parent}\''
-
+    where = _build_where(territory_filter, manufacturer_filter, parent_filter=parent_name, year_filter=year)
     query = f"""
         SELECT 
-            DATE_TRUNC('MONTH', TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) AS "Month",
-            MONTHNAME(TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) AS "Month Name",
-            SUM(TRY_TO_DOUBLE(o.DOLLARS)) AS "Total Dollars",
-            COUNT(DISTINCT o.ORDERNUMBER) AS "Orders"
-        FROM {ORDER_VIEW} o
-        LEFT JOIN (
-            SELECT DISTINCT "DistCode", "ParentDistributor"
-            FROM {DIST_REF}
-            WHERE "DistCode" IS NOT NULL AND "DistCode" != ''
-        ) d ON o.DISTRIBUTORCODE = d."DistCode"
-        WHERE {territory_filter}
-          AND YEAR(TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())
-          AND {parent_condition}
-          AND o.ORDERDATE IS NOT NULL
-          {mfr_clause}
+            DATE_TRUNC('MONTH', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month",
+            MONTHNAME(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month Name",
+            SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
+            COUNT(DISTINCT ORDERNUMBER) AS "Orders"
+        FROM {ORDER_VIEW}
+        WHERE {where}
+          AND ORDERDATE IS NOT NULL
         GROUP BY "Month", "Month Name"
         ORDER BY "Month"
     """
     return conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = None) -> dict:
+def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = None,
+                    year: int = None) -> dict:
     """
     Get PFG (Performance Food Group) super-parent summary.
     Groups Performance FS Corporate + Vistar + Reinhart together.
     """
     pfg_list = ", ".join([f"'{p}'" for p in PFG_PARENTS])
-    mfr_clause = ""
-    if manufacturer_filter:
-        mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
-        mfr_clause = f"AND o.MANUFACTURERNAME IN ({mfr_list})"
-
+    where = _build_where(territory_filter, manufacturer_filter, year_filter=year)
     query = f"""
         SELECT 
-            d."ParentDistributor" AS "Parent",
-            SUM(TRY_TO_DOUBLE(o.DOLLARS)) AS "Total Dollars",
-            COUNT(DISTINCT o.ORDERNUMBER) AS "Orders",
-            COUNT(DISTINCT o.DISTRIBUTORCODE) AS "Store Count"
-        FROM {ORDER_VIEW} o
-        INNER JOIN (
-            SELECT DISTINCT "DistCode", "ParentDistributor"
-            FROM {DIST_REF}
-            WHERE "DistCode" IS NOT NULL AND "DistCode" != ''
-              AND "ParentDistributor" IN ({pfg_list})
-        ) d ON o.DISTRIBUTORCODE = d."DistCode"
-        WHERE {territory_filter}
-          AND YEAR(TRY_TO_DATE(o.ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())
-          {mfr_clause}
-        GROUP BY d."ParentDistributor"
+            PARENT_DISTRIBUTOR AS "Parent",
+            SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
+            COUNT(DISTINCT ORDERNUMBER) AS "Orders",
+            COUNT(DISTINCT DISTRIBUTORNAME) AS "Store Count"
+        FROM {ORDER_VIEW}
+        WHERE {where}
+          AND PARENT_DISTRIBUTOR IN ({pfg_list})
+        GROUP BY PARENT_DISTRIBUTOR
         ORDER BY "Total Dollars" DESC
     """
     df = conn.cursor().execute(query).fetch_pandas_all()
@@ -304,39 +262,13 @@ def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = Non
     }
 
 
-def get_dist_codes_for_parent(conn, parent_name: str) -> list:
-    """Get all DistCodes under a parent distributor for filtering."""
-    safe_parent = parent_name.replace("'", "''")
-    query = f"""
-        SELECT DISTINCT "DistCode"
-        FROM {DIST_REF}
-        WHERE "ParentDistributor" = '{safe_parent}'
-          AND "DistCode" IS NOT NULL AND "DistCode" != ''
-    """
-    df = conn.cursor().execute(query).fetch_pandas_all()
-    return df["DistCode"].tolist() if not df.empty else []
-
-
-def get_dist_codes_for_pfg(conn) -> list:
-    """Get all DistCodes under PFG super-parent."""
-    pfg_list = ", ".join([f"'{p}'" for p in PFG_PARENTS])
-    query = f"""
-        SELECT DISTINCT "DistCode"
-        FROM {DIST_REF}
-        WHERE "ParentDistributor" IN ({pfg_list})
-          AND "DistCode" IS NOT NULL AND "DistCode" != ''
-    """
-    df = conn.cursor().execute(query).fetch_pandas_all()
-    return df["DistCode"].tolist() if not df.empty else []
-
-
 # =============================================================================
 # FILTER OPTIONS
 # =============================================================================
 
-def get_filter_options(conn, territory_filter: str) -> dict:
-    """Get available filter values scoped to user's access (current year)."""
-    where = _build_where(territory_filter)
+def get_filter_options(conn, territory_filter: str, year: int = None) -> dict:
+    """Get available filter values scoped to user's access."""
+    where = _build_where(territory_filter, year_filter=year)
 
     mfr_query = f"""
         SELECT DISTINCT MANUFACTURERNAME 
@@ -346,21 +278,16 @@ def get_filter_options(conn, territory_filter: str) -> dict:
     """
     mfr_df = conn.cursor().execute(mfr_query).fetch_pandas_all()
 
-    # Get parent distributors for the hierarchy filter
+    # Get parent distributors using the PARENT_DISTRIBUTOR column
     parent_query = f"""
         SELECT 
-            COALESCE(d."ParentDistributor", 'Independent') AS parent_name,
-            COUNT(DISTINCT o.DISTRIBUTORCODE) AS store_count
-        FROM {ORDER_VIEW} o
-        LEFT JOIN (
-            SELECT DISTINCT "DistCode", "ParentDistributor"
-            FROM {DIST_REF}
-            WHERE "DistCode" IS NOT NULL AND "DistCode" != ''
-        ) d ON o.DISTRIBUTORCODE = d."DistCode"
+            COALESCE(NULLIF(PARENT_DISTRIBUTOR, ''), 'Independent') AS parent_name,
+            COUNT(DISTINCT DISTRIBUTORNAME) AS store_count
+        FROM {ORDER_VIEW}
         WHERE {where}
         GROUP BY parent_name
-        HAVING SUM(TRY_TO_DOUBLE(o.DOLLARS)) > 0
-        ORDER BY SUM(TRY_TO_DOUBLE(o.DOLLARS)) DESC
+        HAVING SUM(TRY_TO_DOUBLE(DOLLARS)) > 0
+        ORDER BY SUM(TRY_TO_DOUBLE(DOLLARS)) DESC
     """
     parent_df = conn.cursor().execute(parent_query).fetch_pandas_all()
 

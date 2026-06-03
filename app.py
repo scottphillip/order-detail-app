@@ -2,6 +2,7 @@
 Affinity Group - Order Detail Analytics
 External Streamlit app with role-based access control, monthly breakdowns,
 distributor hierarchy, and natural language querying.
+Uses VW_MYORDERDETAIL_ALL which has PARENT_DISTRIBUTOR pre-joined.
 """
 import streamlit as st
 import snowflake.connector
@@ -13,9 +14,8 @@ from utils.auth import authenticate_user, get_access_filter, get_access_display
 from utils.data import (
     get_kpis, get_monthly_breakdown, get_top_manufacturers, get_sales_trend,
     get_distributor_parents, get_parent_stores, get_parent_monthly,
-    get_pfg_summary, get_dist_codes_for_parent, get_dist_codes_for_pfg,
-    get_filter_options, get_categories_for_manufacturers, get_available_years,
-    PFG_PARENTS,
+    get_pfg_summary, get_filter_options, get_categories_for_manufacturers,
+    get_available_years, PFG_PARENTS,
 )
 from utils.nl_query import ask_cortex_analyst
 
@@ -37,7 +37,7 @@ def get_snowflake_connection():
         password=st.secrets["snowflake"]["password"],
         role=st.secrets["snowflake"]["role"],
         warehouse=st.secrets["snowflake"]["warehouse"],
-        database="DB_PROD_RAW",
+        database="DB_NXT",
     )
 
 
@@ -136,9 +136,6 @@ with st.sidebar:
     st.caption(get_access_display(user))
     st.markdown("---")
 
-    # Get filter options
-    options = get_filter_options(conn, territory_filter)
-
     st.markdown("#### Filters")
 
     # Year selector
@@ -153,6 +150,9 @@ with st.sidebar:
         options=available_years if available_years else [current_year],
         index=default_idx,
     )
+
+    # Get filter options scoped to year
+    options = get_filter_options(conn, territory_filter, selected_year)
 
     # Manufacturer filter
     manufacturer_filter = st.multiselect(
@@ -190,67 +190,52 @@ with st.sidebar:
         index=0,
     )
 
-    # Determine parent selection
-    distributor_codes = None
+    # Determine parent filter (string-based, no more dist codes)
+    parent_filter = None
     selected_parent_name = None
+    store_name = None
 
     if selected_parent == "All Distributors":
-        distributor_codes = None
+        parent_filter = None
     elif selected_parent == "PFG (Performance Food Group)":
-        distributor_codes = get_dist_codes_for_pfg(conn)
+        parent_filter = "PFG"
         selected_parent_name = "PFG"
 
         # Level 2: PFG Sub-distributor
-        pfg_sub_options = ["All PFG Companies"]
-        for pfg_p in PFG_PARENTS:
-            pfg_sub_options.append(pfg_p)
-
-        selected_sub = st.selectbox(
-            "Sub-Distributor",
-            options=pfg_sub_options,
-            index=0,
-        )
+        pfg_sub_options = ["All PFG Companies"] + PFG_PARENTS
+        selected_sub = st.selectbox("Sub-Distributor", options=pfg_sub_options, index=0)
 
         if selected_sub != "All PFG Companies":
-            distributor_codes = get_dist_codes_for_parent(conn, selected_sub)
+            parent_filter = selected_sub
             selected_parent_name = selected_sub
 
             # Level 3: Individual Location
-            stores_df = get_parent_stores(conn, territory_filter, selected_sub, manufacturer_filter)
+            stores_df = get_parent_stores(conn, territory_filter, selected_sub,
+                                          manufacturer_filter, selected_year)
             if not stores_df.empty:
                 store_options = ["All Locations"] + stores_df["Store"].tolist()
-                selected_store = st.selectbox(
-                    "Location",
-                    options=store_options,
-                    index=0,
-                )
+                selected_store = st.selectbox("Location", options=store_options, index=0)
                 if selected_store != "All Locations":
-                    code_row = stores_df[stores_df["Store"] == selected_store]
-                    if not code_row.empty:
-                        distributor_codes = [code_row.iloc[0]["Code"]]
+                    store_name = selected_store
                     selected_parent_name = selected_store
 
     elif selected_parent == "Independent":
+        parent_filter = "Independent"
         selected_parent_name = "Independent"
     else:
         # Regular parent (e.g., Restaurant Depot, Sysco, US Foods)
         parent_name = selected_parent.rsplit(" (", 1)[0]
-        distributor_codes = get_dist_codes_for_parent(conn, parent_name)
+        parent_filter = parent_name
         selected_parent_name = parent_name
 
         # Level 2: Individual Location under this parent
-        stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+        stores_df = get_parent_stores(conn, territory_filter, parent_name,
+                                      manufacturer_filter, selected_year)
         if not stores_df.empty:
             store_options = ["All Locations"] + stores_df["Store"].tolist()
-            selected_store = st.selectbox(
-                "Location",
-                options=store_options,
-                index=0,
-            )
+            selected_store = st.selectbox("Location", options=store_options, index=0)
             if selected_store != "All Locations":
-                code_row = stores_df[stores_df["Store"] == selected_store]
-                if not code_row.empty:
-                    distributor_codes = [code_row.iloc[0]["Code"]]
+                store_name = selected_store
                 selected_parent_name = selected_store
 
     st.markdown("---")
@@ -276,13 +261,15 @@ st.caption(" | ".join(subtitle_parts) + f" | {user['DEPARTMENT']} - {user.get('O
 # KPI ROW
 # =====================================================
 
-kpis = get_kpis(conn, territory_filter, manufacturer_filter, distributor_codes, category_filter, selected_year)
+kpis = get_kpis(conn, territory_filter, manufacturer_filter, parent_filter,
+                category_filter, selected_year, store_name)
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("YTD Sales", f"${kpis['dollars']:,.0f}")
 col2.metric("Total Orders", f"{kpis['orders']:,}")
-col3.metric("Total Quantity", f"{kpis['qty']:,.0f}")
-col4.metric("Avg Line Value", f"${kpis['avg_order']:,.2f}")
+col3.metric("Total Cases", f"{kpis['qty']:,.0f}")
+col4.metric("Commission", f"${kpis['comm']:,.0f}")
+col5.metric("Avg Line Value", f"${kpis['avg_order']:,.2f}")
 
 st.markdown("---")
 
@@ -292,7 +279,8 @@ st.markdown("---")
 
 st.markdown("### 📅 Monthly Sales Breakdown")
 
-monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter, distributor_codes, category_filter, selected_year)
+monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter,
+                                   parent_filter, category_filter, selected_year, store_name)
 
 if not monthly_df.empty:
     fig = px.bar(
@@ -311,9 +299,11 @@ if not monthly_df.empty:
 
     # Monthly detail table
     with st.expander("Monthly detail"):
-        display_df = monthly_df[["Month Name", "Total Dollars", "Total Qty", "Orders"]].copy()
+        display_df = monthly_df[["Month Name", "Total Dollars", "Total Qty", "Total Comm", "Orders"]].copy()
         display_df["Total Dollars"] = display_df["Total Dollars"].apply(lambda x: f"${x:,.0f}")
         display_df["Total Qty"] = display_df["Total Qty"].apply(lambda x: f"{x:,.0f}")
+        display_df["Total Comm"] = display_df["Total Comm"].apply(lambda x: f"${x:,.0f}")
+        display_df.columns = ["Month", "Dollars", "Cases", "Commission", "Orders"]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 else:
     st.info("No data available for the selected filters.")
@@ -361,7 +351,8 @@ chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
     st.markdown("#### Top 10 Manufacturers")
-    mfr_df = get_top_manufacturers(conn, territory_filter, distributor_codes, category_filter, selected_year)
+    mfr_df = get_top_manufacturers(conn, territory_filter, parent_filter,
+                                   category_filter, selected_year)
     if not mfr_df.empty:
         fig = px.bar(
             mfr_df, x="Manufacturer", y="Total Dollars",
@@ -374,7 +365,7 @@ with chart_col1:
 
 with chart_col2:
     st.markdown("#### Top Distributor Parents")
-    parents_df = get_distributor_parents(conn, territory_filter, manufacturer_filter)
+    parents_df = get_distributor_parents(conn, territory_filter, manufacturer_filter, selected_year)
     if not parents_df.empty:
         top_parents = parents_df.head(10)
         fig = px.bar(
@@ -395,22 +386,24 @@ st.markdown("---")
 st.markdown("### 🏢 Distributor Hierarchy")
 
 # PFG Summary always shown first
-pfg_data = get_pfg_summary(conn, territory_filter, manufacturer_filter)
+pfg_data = get_pfg_summary(conn, territory_filter, manufacturer_filter, selected_year)
 if pfg_data["total_dollars"] > 0:
     with st.expander(
         f"**PFG (Performance Food Group)** — {format_dollars(pfg_data['total_dollars'])} | {pfg_data['total_stores']} stores",
-        expanded=(selected_parent_name == "PFG")
+        expanded=(parent_filter == "PFG")
     ):
         if not pfg_data["breakdown"].empty:
             for _, row in pfg_data["breakdown"].iterrows():
-                parent_name = row["Parent"]
-                st.markdown(f"**{parent_name}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores")
+                pname = row["Parent"]
+                st.markdown(f"**{pname}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores")
 
-                # Show stores for this sub-parent
-                stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+                stores_df = get_parent_stores(conn, territory_filter, pname,
+                                              manufacturer_filter, selected_year)
                 if not stores_df.empty:
-                    display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].copy()
+                    display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Total Comm", "Orders"]].copy()
                     display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                    display_stores["Total Comm"] = display_stores["Total Comm"].apply(lambda x: f"${x:,.0f}")
+                    display_stores.columns = ["Store", "Dollars", "Cases", "Commission", "Orders"]
                     st.dataframe(display_stores, use_container_width=True, hide_index=True, height=200)
 
 # Other top parents
@@ -420,13 +413,13 @@ if not parents_df.empty:
     ].head(15)
 
     for _, row in non_pfg_parents.iterrows():
-        parent_name = row["Parent"]
+        pname = row["Parent"]
         with st.expander(
-            f"**{parent_name}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores",
-            expanded=(selected_parent_name == parent_name)
+            f"**{pname}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores",
+            expanded=(parent_filter == pname)
         ):
-            # Monthly breakdown for this parent
-            p_monthly = get_parent_monthly(conn, territory_filter, parent_name, manufacturer_filter)
+            p_monthly = get_parent_monthly(conn, territory_filter, pname,
+                                           manufacturer_filter, selected_year)
             if not p_monthly.empty:
                 fig = px.bar(
                     p_monthly, x="Month Name", y="Total Dollars",
@@ -435,11 +428,13 @@ if not parents_df.empty:
                 fig.update_layout(height=250, xaxis_title="", yaxis_title="Sales ($)")
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Store breakdown
-            stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+            stores_df = get_parent_stores(conn, territory_filter, pname,
+                                          manufacturer_filter, selected_year)
             if not stores_df.empty:
-                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].copy()
+                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Total Comm", "Orders"]].copy()
                 display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                display_stores["Total Comm"] = display_stores["Total Comm"].apply(lambda x: f"${x:,.0f}")
+                display_stores.columns = ["Store", "Dollars", "Cases", "Commission", "Orders"]
                 st.dataframe(display_stores, use_container_width=True, hide_index=True, height=300)
 
     # Independent
@@ -449,10 +444,13 @@ if not parents_df.empty:
         with st.expander(
             f"**Independent** — {format_dollars(ind['Total Dollars'])} | {int(ind['Store Count'])} stores"
         ):
-            stores_df = get_parent_stores(conn, territory_filter, "Independent", manufacturer_filter)
+            stores_df = get_parent_stores(conn, territory_filter, "Independent",
+                                          manufacturer_filter, selected_year)
             if not stores_df.empty:
-                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].head(50).copy()
+                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Total Comm", "Orders"]].head(50).copy()
                 display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                display_stores["Total Comm"] = display_stores["Total Comm"].apply(lambda x: f"${x:,.0f}")
+                display_stores.columns = ["Store", "Dollars", "Cases", "Commission", "Orders"]
                 st.dataframe(display_stores, use_container_width=True, hide_index=True, height=400)
 
 # =====================================================
@@ -483,7 +481,7 @@ with st.expander("Send dashboard summary via email"):
                 <p>Generated by {user['DISPLAY_NAME']} on {datetime.now().strftime('%m/%d/%Y %I:%M %p')}</p>
                 <p><strong>Access Level:</strong> {get_access_display(user)}</p>
                 <hr>
-                <h3>YTD Key Metrics ({datetime.now().year})</h3>
+                <h3>{selected_year} YTD Key Metrics</h3>
                 <table style="border-collapse: collapse; width: 100%;">
                     <tr style="background-color: #f2f2f2;">
                         <td style="padding: 10px; border: 1px solid #ddd;"><strong>Total Sales</strong></td>
@@ -494,10 +492,14 @@ with st.expander("Send dashboard summary via email"):
                         <td style="padding: 10px; border: 1px solid #ddd;">{kpis['orders']:,}</td>
                     </tr>
                     <tr style="background-color: #f2f2f2;">
-                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Total Quantity</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Total Cases</strong></td>
                         <td style="padding: 10px; border: 1px solid #ddd;">{kpis['qty']:,.0f}</td>
                     </tr>
                     <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Commission</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">${kpis['comm']:,.0f}</td>
+                    </tr>
+                    <tr style="background-color: #f2f2f2;">
                         <td style="padding: 10px; border: 1px solid #ddd;"><strong>Avg Line Value</strong></td>
                         <td style="padding: 10px; border: 1px solid #ddd;">${kpis['avg_order']:,.2f}</td>
                     </tr>

@@ -28,11 +28,12 @@ def ask_cortex_analyst(conn, question: str, territory_filter: str) -> tuple[pd.D
                 CONCAT(
                     'You are a SQL expert. Generate a Snowflake SQL query to answer: ',
                     '{escaped_question}',
-                    '. Use table DB_PROD_RAW.SCH_CRM_SHAREPOINT.VW_ORDER_DETAIL_APPENDING_WEEKLY. ',
-                    'Columns: MANUFACTURERNAME, DISTRIBUTORNAME, ORDERNUMBER, ORDERDATE (VARCHAR MM/DD/YYYY format - use TRY_TO_DATE(ORDERDATE, ''MM/DD/YYYY'')), ',
+                    '. Use table DB_NXT.SCH_NXT.VW_MYORDERDETAIL_ALL. ',
+                    'Columns: MANUFACTURERNAME, DISTRIBUTORNAME, PARENT_DISTRIBUTOR, ORDERNUMBER, ORDERDATE (VARCHAR MM/DD/YYYY format - use TRY_TO_DATE(ORDERDATE, ''MM/DD/YYYY'')), ',
                     'SHIPDATE, INVOICEDATE, CATEGORY, SKU, DESCRIPTION, QTY (VARCHAR - use TRY_TO_DOUBLE), ',
                     'NETWEIGHT (VARCHAR - use TRY_TO_DOUBLE), PRICE (VARCHAR - use TRY_TO_DOUBLE), ',
-                    'DOLLARS (VARCHAR - use TRY_TO_DOUBLE), SALESREPNAME, SHIPTONAME, OFFICENAME, ',
+                    'DOLLARS (VARCHAR - use TRY_TO_DOUBLE), COMM (VARCHAR - use TRY_TO_DOUBLE), ',
+                    'SALESREPNAME, SHIPTONAME, OFFICENAME, ',
                     'REGIONNAME, TERRITORYNAME, ORDERSTATUS. ',
                     'Return ONLY the SQL query, no explanation. Round dollars to 2 decimals.'
                 )
