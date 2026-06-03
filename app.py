@@ -148,26 +148,23 @@ with st.sidebar:
         placeholder="All manufacturers"
     )
 
-    # Distributor parent filter (hierarchy-based)
+    # Distributor hierarchy filter: Parent → Sub-distributor → Location
     st.markdown("#### Distributor")
+
+    # Level 1: Parent Distributor
     parent_options = ["All Distributors", "PFG (Performance Food Group)"]
     for p in options.get("parents", []):
         if p["name"] not in ["Independent"] and p["name"] not in PFG_PARENTS:
             parent_options.append(f"{p['name']} ({p['stores']})")
-    # Add PFG sub-parents and Independent at end
-    for p in options.get("parents", []):
-        if p["name"] in PFG_PARENTS:
-            parent_options.append(f"  └ {p['name']} ({p['stores']})")
     parent_options.append("Independent")
 
     selected_parent = st.selectbox(
-        "Distributor Parent",
+        "Parent Distributor",
         options=parent_options,
         index=0,
-        label_visibility="collapsed"
     )
 
-    # Determine distributor filter codes
+    # Determine parent selection
     distributor_codes = None
     selected_parent_name = None
 
@@ -176,18 +173,59 @@ with st.sidebar:
     elif selected_parent == "PFG (Performance Food Group)":
         distributor_codes = get_dist_codes_for_pfg(conn)
         selected_parent_name = "PFG"
+
+        # Level 2: PFG Sub-distributor
+        pfg_sub_options = ["All PFG Companies"]
+        for pfg_p in PFG_PARENTS:
+            pfg_sub_options.append(pfg_p)
+
+        selected_sub = st.selectbox(
+            "Sub-Distributor",
+            options=pfg_sub_options,
+            index=0,
+        )
+
+        if selected_sub != "All PFG Companies":
+            distributor_codes = get_dist_codes_for_parent(conn, selected_sub)
+            selected_parent_name = selected_sub
+
+            # Level 3: Individual Location
+            stores_df = get_parent_stores(conn, territory_filter, selected_sub, manufacturer_filter)
+            if not stores_df.empty:
+                store_options = ["All Locations"] + stores_df["Store"].tolist()
+                selected_store = st.selectbox(
+                    "Location",
+                    options=store_options,
+                    index=0,
+                )
+                if selected_store != "All Locations":
+                    code_row = stores_df[stores_df["Store"] == selected_store]
+                    if not code_row.empty:
+                        distributor_codes = [code_row.iloc[0]["Code"]]
+                    selected_parent_name = selected_store
+
     elif selected_parent == "Independent":
         selected_parent_name = "Independent"
-    elif selected_parent.startswith("  └ "):
-        # PFG sub-parent
-        parent_name = selected_parent[4:].rsplit(" (", 1)[0]
-        distributor_codes = get_dist_codes_for_parent(conn, parent_name)
-        selected_parent_name = parent_name
     else:
-        # Regular parent
+        # Regular parent (e.g., Restaurant Depot, Sysco, US Foods)
         parent_name = selected_parent.rsplit(" (", 1)[0]
         distributor_codes = get_dist_codes_for_parent(conn, parent_name)
         selected_parent_name = parent_name
+
+        # Level 2: Individual Location under this parent
+        stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+        if not stores_df.empty:
+            store_options = ["All Locations"] + stores_df["Store"].tolist()
+            selected_store = st.selectbox(
+                "Location",
+                options=store_options,
+                index=0,
+            )
+            if selected_store != "All Locations":
+                code_row = stores_df[stores_df["Store"] == selected_store]
+                if not code_row.empty:
+                    distributor_codes = [code_row.iloc[0]["Code"]]
+                selected_parent_name = selected_store
 
     st.markdown("---")
     if st.button("Sign Out"):
