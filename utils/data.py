@@ -57,10 +57,13 @@ def get_available_years(conn, territory_filter: str) -> list:
         SELECT DISTINCT YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS yr
         FROM {ORDER_VIEW}
         WHERE {territory_filter} AND ORDERDATE IS NOT NULL
+          AND TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY') IS NOT NULL
         ORDER BY yr DESC
     """
     df = conn.cursor().execute(query).fetch_pandas_all()
-    return [int(y) for y in df["YR"].tolist()] if not df.empty else []
+    if df.empty:
+        return []
+    return [int(y) for y in df["YR"].dropna().tolist()]
 
 
 def get_categories_for_manufacturers(conn, territory_filter: str,
