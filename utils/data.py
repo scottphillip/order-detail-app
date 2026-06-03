@@ -99,12 +99,28 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
     if df.empty:
         return {"dollars": 0, "orders": 0, "qty": 0, "comm": 0, "avg_order": 0}
     row = df.iloc[0]
+    import math
+
+    def safe_float(v):
+        try:
+            f = float(v)
+            return 0.0 if math.isnan(f) else f
+        except (TypeError, ValueError):
+            return 0.0
+
+    def safe_int(v):
+        try:
+            f = float(v)
+            return 0 if math.isnan(f) else int(f)
+        except (TypeError, ValueError):
+            return 0
+
     return {
-        "dollars": float(row["TOTAL_DOLLARS"] or 0),
-        "orders": int(row["TOTAL_ORDERS"] or 0),
-        "qty": float(row["TOTAL_QTY"] or 0),
-        "comm": float(row["TOTAL_COMM"] or 0),
-        "avg_order": float(row["AVG_LINE_VALUE"] or 0),
+        "dollars": safe_float(row["TOTAL_DOLLARS"]),
+        "orders": safe_int(row["TOTAL_ORDERS"]),
+        "qty": safe_float(row["TOTAL_QTY"]),
+        "comm": safe_float(row["TOTAL_COMM"]),
+        "avg_order": safe_float(row["AVG_LINE_VALUE"]),
     }
 
 
