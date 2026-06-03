@@ -8,6 +8,9 @@ import pandas as pd
 # Main order view — has PARENT_DISTRIBUTOR already joined
 ORDER_VIEW = "DB_NXT.SCH_NXT.VW_MYORDERDETAIL_ALL"
 
+# Date parsing: data has mixed formats (MM/DD/YYYY and YYYY-MM-DD)
+PARSE_DATE = "COALESCE(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY'), TRY_TO_DATE(ORDERDATE, 'YYYY-MM-DD'))"
+
 # PFG super-parent: Performance Food Group encompasses these parent distributors
 PFG_PARENTS = [
     "Performance Foodservice Corporate",
@@ -22,9 +25,9 @@ def _build_where(territory_filter: str, manufacturer_filter: list = None,
     """Build WHERE clause from filters. Defaults to current year if year_filter not specified."""
     clauses = [territory_filter]
     if year_filter:
-        clauses.append(f"YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) = {year_filter}")
+        clauses.append(f"YEAR({PARSE_DATE}) = {year_filter}")
     else:
-        clauses.append("YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())")
+        clauses.append(f"YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())")
     if manufacturer_filter:
         mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
         clauses.append(f"MANUFACTURERNAME IN ({mfr_list})")
@@ -54,10 +57,10 @@ def _add_store_filter(where: str, store_name: str = None) -> str:
 def get_available_years(conn, territory_filter: str) -> list:
     """Get distinct years available in the order data."""
     query = f"""
-        SELECT DISTINCT YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS yr
+        SELECT DISTINCT YEAR({PARSE_DATE}) AS yr
         FROM {ORDER_VIEW}
         WHERE {territory_filter} AND ORDERDATE IS NOT NULL
-          AND TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY') IS NOT NULL
+          AND {PARSE_DATE} IS NOT NULL
         ORDER BY yr DESC
     """
     df = conn.cursor().execute(query).fetch_pandas_all()
@@ -135,15 +138,15 @@ def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list
     where = _add_store_filter(where, store_name)
     query = f"""
         SELECT 
-            DATE_TRUNC('MONTH', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month",
-            MONTHNAME(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month Name",
+            DATE_TRUNC('MONTH', {PARSE_DATE}) AS "Month",
+            MONTHNAME({PARSE_DATE}) AS "Month Name",
             SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
             SUM(TRY_TO_DOUBLE(QTY)) AS "Total Qty",
             SUM(TRY_TO_DOUBLE(COMM)) AS "Total Comm",
             COUNT(DISTINCT ORDERNUMBER) AS "Orders"
         FROM {ORDER_VIEW}
         WHERE {where}
-          AND ORDERDATE IS NOT NULL
+          AND {PARSE_DATE} IS NOT NULL
         GROUP BY "Month", "Month Name"
         ORDER BY "Month"
     """
@@ -179,12 +182,12 @@ def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = Non
     where = _build_where(territory_filter, manufacturer_filter, parent_filter, category_filter, year)
     query = f"""
         SELECT 
-            DATE_TRUNC('WEEK', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Week",
+            DATE_TRUNC('WEEK', {PARSE_DATE}) AS "Week",
             SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
             COUNT(DISTINCT ORDERNUMBER) AS "Orders"
         FROM {ORDER_VIEW}
         WHERE {where}
-          AND ORDERDATE IS NOT NULL
+          AND {PARSE_DATE} IS NOT NULL
         GROUP BY "Week"
         ORDER BY "Week"
     """
@@ -238,13 +241,13 @@ def get_parent_monthly(conn, territory_filter: str, parent_name: str,
     where = _build_where(territory_filter, manufacturer_filter, parent_filter=parent_name, year_filter=year)
     query = f"""
         SELECT 
-            DATE_TRUNC('MONTH', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month",
-            MONTHNAME(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month Name",
+            DATE_TRUNC('MONTH', {PARSE_DATE}) AS "Month",
+            MONTHNAME({PARSE_DATE}) AS "Month Name",
             SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
             COUNT(DISTINCT ORDERNUMBER) AS "Orders"
         FROM {ORDER_VIEW}
         WHERE {where}
-          AND ORDERDATE IS NOT NULL
+          AND {PARSE_DATE} IS NOT NULL
         GROUP BY "Month", "Month Name"
         ORDER BY "Month"
     """
