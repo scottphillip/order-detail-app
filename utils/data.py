@@ -19,10 +19,12 @@ PFG_PARENTS = [
 
 def _build_where(territory_filter: str, manufacturer_filter: list = None,
                  distributor_codes: list = None, category_filter: list = None,
-                 year_filter: bool = True) -> str:
-    """Build WHERE clause from filters. Defaults to current year."""
+                 year_filter: int = None) -> str:
+    """Build WHERE clause from filters. Defaults to current year if year_filter not specified."""
     clauses = [territory_filter]
     if year_filter:
+        clauses.append(f"YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) = {year_filter}")
+    else:
         clauses.append("YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) = YEAR(CURRENT_DATE())")
     if manufacturer_filter:
         mfr_list = ", ".join([f"'{m.replace(chr(39), chr(39)+chr(39))}'" for m in manufacturer_filter])
@@ -34,6 +36,18 @@ def _build_where(territory_filter: str, manufacturer_filter: list = None,
         cat_list = ", ".join([f"'{c.replace(chr(39), chr(39)+chr(39))}'" for c in category_filter])
         clauses.append(f"CATEGORY IN ({cat_list})")
     return " AND ".join(clauses)
+
+
+def get_available_years(conn, territory_filter: str) -> list:
+    """Get distinct years available in the order data."""
+    query = f"""
+        SELECT DISTINCT YEAR(TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS yr
+        FROM {ORDER_VIEW}
+        WHERE {territory_filter} AND ORDERDATE IS NOT NULL
+        ORDER BY yr DESC
+    """
+    df = conn.cursor().execute(query).fetch_pandas_all()
+    return df["YR"].tolist() if not df.empty else []
 
 
 def get_categories_for_manufacturers(conn, territory_filter: str,
@@ -51,9 +65,10 @@ def get_categories_for_manufacturers(conn, territory_filter: str,
 
 
 def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
-             distributor_codes: list = None, category_filter: list = None) -> dict:
+             distributor_codes: list = None, category_filter: list = None,
+             year: int = None) -> dict:
     """Get KPI metrics for the filtered data (defaults to current year)."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter)
+    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
     query = f"""
         SELECT 
             COALESCE(SUM(TRY_TO_DOUBLE(DOLLARS)), 0) AS total_dollars,
@@ -78,9 +93,10 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
 
 
 def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list = None,
-                          distributor_codes: list = None, category_filter: list = None) -> pd.DataFrame:
-    """YTD month-by-month sales breakdown for current year."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter)
+                          distributor_codes: list = None, category_filter: list = None,
+                          year: int = None) -> pd.DataFrame:
+    """YTD month-by-month sales breakdown for selected year."""
+    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
     query = f"""
         SELECT 
             DATE_TRUNC('MONTH', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Month",
@@ -98,9 +114,9 @@ def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list
 
 
 def get_top_manufacturers(conn, territory_filter: str, distributor_codes: list = None,
-                          category_filter: list = None, limit: int = 10) -> pd.DataFrame:
-    """Get top manufacturers by dollars (current year)."""
-    where = _build_where(territory_filter, distributor_codes=distributor_codes, category_filter=category_filter)
+                          category_filter: list = None, year: int = None, limit: int = 10) -> pd.DataFrame:
+    """Get top manufacturers by dollars (selected year)."""
+    where = _build_where(territory_filter, distributor_codes=distributor_codes, category_filter=category_filter, year_filter=year)
     query = f"""
         SELECT 
             MANUFACTURERNAME AS "Manufacturer",
@@ -118,9 +134,10 @@ def get_top_manufacturers(conn, territory_filter: str, distributor_codes: list =
 
 
 def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = None,
-                    distributor_codes: list = None, category_filter: list = None) -> pd.DataFrame:
-    """Get weekly sales trend (current year)."""
-    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter)
+                    distributor_codes: list = None, category_filter: list = None,
+                    year: int = None) -> pd.DataFrame:
+    """Get weekly sales trend (selected year)."""
+    where = _build_where(territory_filter, manufacturer_filter, distributor_codes, category_filter, year)
     query = f"""
         SELECT 
             DATE_TRUNC('WEEK', TRY_TO_DATE(ORDERDATE, 'MM/DD/YYYY')) AS "Week",
