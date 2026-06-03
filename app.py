@@ -1,19 +1,20 @@
 """
 Affinity Group - Order Detail Analytics
-External Streamlit app with role-based access control and natural language querying.
+External Streamlit app with role-based access control, monthly breakdowns,
+distributor hierarchy, and natural language querying.
 """
 import streamlit as st
 import snowflake.connector
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from utils.auth import authenticate_user, get_access_filter, get_access_display
 from utils.data import (
-    get_kpis, get_top_manufacturers, get_sales_trend,
-    get_distributor_breakdown, get_filter_options
+    get_kpis, get_monthly_breakdown, get_top_manufacturers, get_sales_trend,
+    get_distributor_parents, get_parent_stores, get_parent_monthly,
+    get_pfg_summary, get_dist_codes_for_parent, get_dist_codes_for_pfg,
+    get_filter_options, PFG_PARENTS,
 )
 from utils.nl_query import ask_cortex_analyst
 
@@ -45,48 +46,45 @@ def send_email_via_graph(recipient_email: str, subject: str, body_html: str):
     escaped_email = recipient_email.replace("'", "''")
     escaped_subject = subject.replace("'", "''")
     escaped_body = body_html.replace("'", "''")
-
     query = f"""
         CALL OFFICE365.DATA.SEND_EMAIL_VIA_GRAPH(
-            '{escaped_email}',
-            '{escaped_subject}',
-            '{escaped_body}'
+            '{escaped_email}', '{escaped_subject}', '{escaped_body}'
         )
     """
-    result = conn.cursor().execute(query).fetchone()
-    return result
+    return conn.cursor().execute(query).fetchone()
 
 
 def auto_chart(df):
     """Auto-generate a chart based on the DataFrame structure."""
     if df is None or df.empty:
         return None
-
     cols = df.columns.tolist()
     numeric_cols = df.select_dtypes(include=["number", "float64", "int64"]).columns.tolist()
     non_numeric_cols = [c for c in cols if c not in numeric_cols]
-
     if not numeric_cols:
         return None
-
-    # If we have a date-like column and a numeric column -> line chart
-    date_cols = [c for c in cols if "date" in c.lower() or "week" in c.lower() or "month" in c.lower() or "year" in c.lower()]
+    date_cols = [c for c in cols if "date" in c.lower() or "week" in c.lower()
+                 or "month" in c.lower() or "year" in c.lower()]
     if date_cols and numeric_cols:
-        fig = px.line(df, x=date_cols[0], y=numeric_cols[0], title=f"{numeric_cols[0]} over {date_cols[0]}")
+        fig = px.line(df, x=date_cols[0], y=numeric_cols[0],
+                      title=f"{numeric_cols[0]} over {date_cols[0]}")
         return fig
-
-    # If we have a categorical column and a numeric column -> bar chart
     if non_numeric_cols and numeric_cols:
-        # Limit to top 15 for readability
         plot_df = df.head(15)
-        fig = px.bar(
-            plot_df, x=non_numeric_cols[0], y=numeric_cols[0],
-            title=f"{numeric_cols[0]} by {non_numeric_cols[0]}"
-        )
+        fig = px.bar(plot_df, x=non_numeric_cols[0], y=numeric_cols[0],
+                     title=f"{numeric_cols[0]} by {non_numeric_cols[0]}")
         fig.update_layout(xaxis_tickangle=-45)
         return fig
-
     return None
+
+
+def format_dollars(val):
+    """Format dollar amounts."""
+    if val >= 1_000_000:
+        return f"${val/1_000_000:.1f}M"
+    if val >= 1_000:
+        return f"${val/1_000:.0f}K"
+    return f"${val:,.0f}"
 
 
 # =====================================================
@@ -116,8 +114,7 @@ if "user" not in st.session_state:
                     st.session_state.user = user
                     st.rerun()
                 else:
-                    st.error("Email not found in the Affinity directory. Please check your email address.")
-
+                    st.error("Email not found in the Affinity directory.")
     st.stop()
 
 
@@ -129,49 +126,131 @@ conn = get_snowflake_connection()
 user = st.session_state.user
 territory_filter = get_access_filter(user)
 
-# Sidebar
+# =====================================================
+# SIDEBAR
+# =====================================================
+
 with st.sidebar:
     st.markdown(f"### Welcome, {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
     st.markdown("---")
 
-    # Get filter options scoped to user's access
+    # Get filter options
     options = get_filter_options(conn, territory_filter)
 
     st.markdown("#### Filters")
+
+    # Manufacturer filter
     manufacturer_filter = st.multiselect(
         "Manufacturer",
         options=options["manufacturers"],
         default=[],
         placeholder="All manufacturers"
     )
-    distributor_filter = st.multiselect(
-        "Distributor",
-        options=options["distributors"],
-        default=[],
-        placeholder="All distributors"
+
+    # Distributor parent filter (hierarchy-based)
+    st.markdown("#### Distributor")
+    parent_options = ["All Distributors", "PFG (Performance Food Group)"]
+    for p in options.get("parents", []):
+        if p["name"] not in ["Independent"] and p["name"] not in PFG_PARENTS:
+            parent_options.append(f"{p['name']} ({p['stores']})")
+    # Add PFG sub-parents and Independent at end
+    for p in options.get("parents", []):
+        if p["name"] in PFG_PARENTS:
+            parent_options.append(f"  └ {p['name']} ({p['stores']})")
+    parent_options.append("Independent")
+
+    selected_parent = st.selectbox(
+        "Distributor Parent",
+        options=parent_options,
+        index=0,
+        label_visibility="collapsed"
     )
+
+    # Determine distributor filter codes
+    distributor_codes = None
+    selected_parent_name = None
+
+    if selected_parent == "All Distributors":
+        distributor_codes = None
+    elif selected_parent == "PFG (Performance Food Group)":
+        distributor_codes = get_dist_codes_for_pfg(conn)
+        selected_parent_name = "PFG"
+    elif selected_parent == "Independent":
+        selected_parent_name = "Independent"
+    elif selected_parent.startswith("  └ "):
+        # PFG sub-parent
+        parent_name = selected_parent[4:].rsplit(" (", 1)[0]
+        distributor_codes = get_dist_codes_for_parent(conn, parent_name)
+        selected_parent_name = parent_name
+    else:
+        # Regular parent
+        parent_name = selected_parent.rsplit(" (", 1)[0]
+        distributor_codes = get_dist_codes_for_parent(conn, parent_name)
+        selected_parent_name = parent_name
 
     st.markdown("---")
     if st.button("Sign Out"):
         del st.session_state.user
         st.rerun()
 
-# Header
+# =====================================================
+# HEADER
+# =====================================================
+
 st.title("📊 Order Detail Analytics")
-st.caption(f"Data from weekly order detail reports | {user['DEPARTMENT']} - {user.get('OFFICE_LOCATION', 'All')}")
+subtitle_parts = [f"{datetime.now().year} YTD"]
+if manufacturer_filter:
+    subtitle_parts.append(f"Mfr: {', '.join(manufacturer_filter[:3])}")
+if selected_parent_name:
+    subtitle_parts.append(f"Dist: {selected_parent_name}")
+st.caption(" | ".join(subtitle_parts) + f" | {user['DEPARTMENT']} - {user.get('OFFICE_LOCATION', 'All')}")
 
 # =====================================================
 # KPI ROW
 # =====================================================
 
-kpis = get_kpis(conn, territory_filter, manufacturer_filter, distributor_filter)
+kpis = get_kpis(conn, territory_filter, manufacturer_filter, distributor_codes)
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Sales", f"${kpis['dollars']:,.0f}")
+col1.metric("YTD Sales", f"${kpis['dollars']:,.0f}")
 col2.metric("Total Orders", f"{kpis['orders']:,}")
 col3.metric("Total Quantity", f"{kpis['qty']:,.0f}")
 col4.metric("Avg Line Value", f"${kpis['avg_order']:,.2f}")
+
+st.markdown("---")
+
+# =====================================================
+# MONTHLY BREAKDOWN (DEFAULT VIEW)
+# =====================================================
+
+st.markdown("### 📅 Monthly Sales Breakdown")
+
+monthly_df = get_monthly_breakdown(conn, territory_filter, manufacturer_filter, distributor_codes)
+
+if not monthly_df.empty:
+    fig = px.bar(
+        monthly_df, x="Month Name", y="Total Dollars",
+        text_auto="$.2s",
+        color_discrete_sequence=["#1B4F72"],
+    )
+    fig.update_layout(
+        height=350,
+        xaxis_title="",
+        yaxis_title="Sales ($)",
+        xaxis_tickangle=0,
+    )
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Monthly detail table
+    with st.expander("Monthly detail"):
+        display_df = monthly_df[["Month Name", "Total Dollars", "Total Qty", "Orders"]].copy()
+        display_df["Total Dollars"] = display_df["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+        display_df["Total Qty"] = display_df["Total Qty"].apply(lambda x: f"{x:,.0f}")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+else:
+    st.info("No data available for the selected filters.")
 
 st.markdown("---")
 
@@ -184,7 +263,7 @@ st.caption("Type a question in plain English and get results with charts.")
 
 question = st.text_input(
     "Your question",
-    placeholder="e.g., What are the top 5 manufacturers by total dollars?",
+    placeholder="e.g., What are the top 5 manufacturers by total dollars this month?",
     label_visibility="collapsed"
 )
 
@@ -193,14 +272,10 @@ if question:
         result_df, sql_or_error = ask_cortex_analyst(conn, question, territory_filter)
 
     if result_df is not None and not result_df.empty:
-        # Show chart if possible
         chart = auto_chart(result_df)
         if chart:
             st.plotly_chart(chart, use_container_width=True)
-
-        # Show data table
         st.dataframe(result_df, use_container_width=True, hide_index=True)
-
         with st.expander("View generated SQL"):
             st.code(sql_or_error, language="sql")
     elif result_df is not None and result_df.empty:
@@ -211,7 +286,7 @@ if question:
 st.markdown("---")
 
 # =====================================================
-# DEFAULT CHARTS
+# TOP MANUFACTURERS + DISTRIBUTOR PARENTS
 # =====================================================
 
 st.markdown("### 📈 Overview")
@@ -219,8 +294,8 @@ st.markdown("### 📈 Overview")
 chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
-    st.markdown("#### Top 10 Manufacturers by Sales")
-    mfr_df = get_top_manufacturers(conn, territory_filter)
+    st.markdown("#### Top 10 Manufacturers")
+    mfr_df = get_top_manufacturers(conn, territory_filter, distributor_codes)
     if not mfr_df.empty:
         fig = px.bar(
             mfr_df, x="Manufacturer", y="Total Dollars",
@@ -229,31 +304,90 @@ with chart_col1:
         fig.update_layout(xaxis_tickangle=-45, height=400)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No data available for your territory.")
+        st.info("No manufacturer data available.")
 
 with chart_col2:
-    st.markdown("#### Weekly Sales Trend")
-    trend_df = get_sales_trend(conn, territory_filter)
-    if not trend_df.empty:
-        fig = px.line(
-            trend_df, x="Week", y="Total Dollars",
-            color_discrete_sequence=["#2E86C1"]
+    st.markdown("#### Top Distributor Parents")
+    parents_df = get_distributor_parents(conn, territory_filter, manufacturer_filter)
+    if not parents_df.empty:
+        top_parents = parents_df.head(10)
+        fig = px.bar(
+            top_parents, x="Parent", y="Total Dollars",
+            color_discrete_sequence=["#148F77"]
         )
-        fig.update_layout(height=400)
+        fig.update_layout(xaxis_tickangle=-45, height=400)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No trend data available.")
+        st.info("No distributor data available.")
 
-# Distributor breakdown
-st.markdown("#### Top 10 Distributors by Sales")
-dist_df = get_distributor_breakdown(conn, territory_filter)
-if not dist_df.empty:
-    fig = px.bar(
-        dist_df, x="Distributor", y="Total Dollars",
-        color_discrete_sequence=["#148F77"]
-    )
-    fig.update_layout(xaxis_tickangle=-45, height=400)
-    st.plotly_chart(fig, use_container_width=True)
+st.markdown("---")
+
+# =====================================================
+# DISTRIBUTOR HIERARCHY DRILL-DOWN
+# =====================================================
+
+st.markdown("### 🏢 Distributor Hierarchy")
+
+# PFG Summary always shown first
+pfg_data = get_pfg_summary(conn, territory_filter, manufacturer_filter)
+if pfg_data["total_dollars"] > 0:
+    with st.expander(
+        f"**PFG (Performance Food Group)** — {format_dollars(pfg_data['total_dollars'])} | {pfg_data['total_stores']} stores",
+        expanded=(selected_parent_name == "PFG")
+    ):
+        if not pfg_data["breakdown"].empty:
+            for _, row in pfg_data["breakdown"].iterrows():
+                parent_name = row["Parent"]
+                st.markdown(f"**{parent_name}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores")
+
+                # Show stores for this sub-parent
+                stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+                if not stores_df.empty:
+                    display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].copy()
+                    display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                    st.dataframe(display_stores, use_container_width=True, hide_index=True, height=200)
+
+# Other top parents
+if not parents_df.empty:
+    non_pfg_parents = parents_df[
+        ~parents_df["Parent"].isin(PFG_PARENTS + ["Independent"])
+    ].head(15)
+
+    for _, row in non_pfg_parents.iterrows():
+        parent_name = row["Parent"]
+        with st.expander(
+            f"**{parent_name}** — {format_dollars(row['Total Dollars'])} | {int(row['Store Count'])} stores",
+            expanded=(selected_parent_name == parent_name)
+        ):
+            # Monthly breakdown for this parent
+            p_monthly = get_parent_monthly(conn, territory_filter, parent_name, manufacturer_filter)
+            if not p_monthly.empty:
+                fig = px.bar(
+                    p_monthly, x="Month Name", y="Total Dollars",
+                    color_discrete_sequence=["#148F77"],
+                )
+                fig.update_layout(height=250, xaxis_title="", yaxis_title="Sales ($)")
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Store breakdown
+            stores_df = get_parent_stores(conn, territory_filter, parent_name, manufacturer_filter)
+            if not stores_df.empty:
+                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].copy()
+                display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                st.dataframe(display_stores, use_container_width=True, hide_index=True, height=300)
+
+    # Independent
+    ind_row = parents_df[parents_df["Parent"] == "Independent"]
+    if not ind_row.empty:
+        ind = ind_row.iloc[0]
+        with st.expander(
+            f"**Independent** — {format_dollars(ind['Total Dollars'])} | {int(ind['Store Count'])} stores"
+        ):
+            stores_df = get_parent_stores(conn, territory_filter, "Independent", manufacturer_filter)
+            if not stores_df.empty:
+                display_stores = stores_df[["Store", "Total Dollars", "Total Qty", "Orders"]].head(50).copy()
+                display_stores["Total Dollars"] = display_stores["Total Dollars"].apply(lambda x: f"${x:,.0f}")
+                st.dataframe(display_stores, use_container_width=True, hide_index=True, height=400)
 
 # =====================================================
 # EMAIL RESULTS
@@ -264,9 +398,7 @@ st.markdown("### 📧 Email Results")
 
 with st.expander("Send dashboard summary via email"):
     email_recipient = st.text_input(
-        "Recipient email",
-        value=user["MAIL"],
-        key="email_recipient"
+        "Recipient email", value=user["MAIL"], key="email_recipient"
     )
     email_subject = st.text_input(
         "Subject",
@@ -278,7 +410,6 @@ with st.expander("Send dashboard summary via email"):
         if not email_recipient:
             st.error("Please enter a recipient email.")
         else:
-            # Build HTML summary
             html_body = f"""
             <html>
             <body style="font-family: Arial, sans-serif;">
@@ -286,7 +417,7 @@ with st.expander("Send dashboard summary via email"):
                 <p>Generated by {user['DISPLAY_NAME']} on {datetime.now().strftime('%m/%d/%Y %I:%M %p')}</p>
                 <p><strong>Access Level:</strong> {get_access_display(user)}</p>
                 <hr>
-                <h3>Key Metrics</h3>
+                <h3>YTD Key Metrics ({datetime.now().year})</h3>
                 <table style="border-collapse: collapse; width: 100%;">
                     <tr style="background-color: #f2f2f2;">
                         <td style="padding: 10px; border: 1px solid #ddd;"><strong>Total Sales</strong></td>
@@ -312,10 +443,9 @@ with st.expander("Send dashboard summary via email"):
             </body>
             </html>
             """
-
             with st.spinner("Sending email..."):
                 try:
-                    result = send_email_via_graph(email_recipient, email_subject, html_body)
+                    send_email_via_graph(email_recipient, email_subject, html_body)
                     st.success(f"Email sent to {email_recipient}")
                 except Exception as e:
                     st.error(f"Failed to send email: {str(e)}")
