@@ -15,15 +15,17 @@ def authenticate_user(email: str, conn) -> dict | None:
     if not email.endswith("@affinitysales.com"):
         return None
 
-    query = """
+    query = f"""
         SELECT 
             DISPLAY_NAME, MAIL, DEPARTMENT, OFFICE_LOCATION, JOB_TITLE
         FROM DB_PROD_RAW.SCH_CRM_SHAREPOINT.V_OFFICE365_USERS
-        WHERE LOWER(MAIL) = %s
+        WHERE LOWER(MAIL) = '{email}'
           AND ACCOUNT_ENABLED = TRUE
         LIMIT 1
     """
-    df = conn.cursor().execute(query, (email,)).fetch_pandas_all()
+    cur = conn.cursor()
+    cur.execute(query)
+    df = cur.fetch_pandas_all()
 
     if df.empty:
         return None

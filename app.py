@@ -35,6 +35,7 @@ def get_snowflake_connection():
         password=st.secrets["snowflake"]["password"],
         role=st.secrets["snowflake"]["role"],
         warehouse=st.secrets["snowflake"]["warehouse"],
+        database="DB_PROD_RAW",
     )
 
 
