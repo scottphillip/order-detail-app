@@ -18,9 +18,8 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
-def get_snowflake_connection():
-    """Create a Snowflake connection using secrets."""
+def _create_snowflake_connection():
+    """Create a fresh Snowflake connection."""
     return snowflake.connector.connect(
         account=st.secrets["snowflake"]["account"],
         user=st.secrets["snowflake"]["user"],
@@ -29,6 +28,18 @@ def get_snowflake_connection():
         warehouse=st.secrets["snowflake"]["warehouse"],
         database="DB_NXT",
     )
+
+
+def get_snowflake_connection():
+    """Get Snowflake connection with automatic reconnect on token expiry."""
+    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
+        st.session_state.sf_conn = _create_snowflake_connection()
+    else:
+        try:
+            st.session_state.sf_conn.cursor().execute("SELECT 1")
+        except Exception:
+            st.session_state.sf_conn = _create_snowflake_connection()
+    return st.session_state.sf_conn
 
 
 # =====================================================

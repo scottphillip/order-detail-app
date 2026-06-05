@@ -20,17 +20,30 @@ if "user" not in st.session_state:
     st.stop()
 
 
-@st.cache_resource
 def get_snowflake_connection():
     import snowflake.connector
-    return snowflake.connector.connect(
-        account=st.secrets["snowflake"]["account"],
-        user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
-        role=st.secrets["snowflake"]["role"],
-        warehouse=st.secrets["snowflake"]["warehouse"],
-        database="DB_NXT",
-    )
+    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
+        st.session_state.sf_conn = snowflake.connector.connect(
+            account=st.secrets["snowflake"]["account"],
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            role=st.secrets["snowflake"]["role"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database="DB_NXT",
+        )
+    else:
+        try:
+            st.session_state.sf_conn.cursor().execute("SELECT 1")
+        except Exception:
+            st.session_state.sf_conn = snowflake.connector.connect(
+                account=st.secrets["snowflake"]["account"],
+                user=st.secrets["snowflake"]["user"],
+                password=st.secrets["snowflake"]["password"],
+                role=st.secrets["snowflake"]["role"],
+                warehouse=st.secrets["snowflake"]["warehouse"],
+                database="DB_NXT",
+            )
+    return st.session_state.sf_conn
 
 
 conn = get_snowflake_connection()

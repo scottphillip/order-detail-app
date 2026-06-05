@@ -35,17 +35,30 @@ if "user" not in st.session_state:
     st.stop()
 
 
-@st.cache_resource
 def get_snowflake_connection():
     import snowflake.connector
-    return snowflake.connector.connect(
-        account=st.secrets["snowflake"]["account"],
-        user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
-        role=st.secrets["snowflake"]["role"],
-        warehouse=st.secrets["snowflake"]["warehouse"],
-        database="DB_PROD_CSM",
-    )
+    if "sf_conn_csm" not in st.session_state or st.session_state.sf_conn_csm is None:
+        st.session_state.sf_conn_csm = snowflake.connector.connect(
+            account=st.secrets["snowflake"]["account"],
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            role=st.secrets["snowflake"]["role"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database="DB_PROD_CSM",
+        )
+    else:
+        try:
+            st.session_state.sf_conn_csm.cursor().execute("SELECT 1")
+        except Exception:
+            st.session_state.sf_conn_csm = snowflake.connector.connect(
+                account=st.secrets["snowflake"]["account"],
+                user=st.secrets["snowflake"]["user"],
+                password=st.secrets["snowflake"]["password"],
+                role=st.secrets["snowflake"]["role"],
+                warehouse=st.secrets["snowflake"]["warehouse"],
+                database="DB_PROD_CSM",
+            )
+    return st.session_state.sf_conn_csm
 
 
 conn = get_snowflake_connection()
