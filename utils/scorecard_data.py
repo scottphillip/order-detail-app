@@ -101,9 +101,28 @@ def _build_scorecard_where(access_filter: str, years: list = None,
 # ─────────────────────────────────────────────
 
 @st.cache_data(ttl=600)
-def get_scorecard_kpis(_conn, access_filter: str, year: int, clients: tuple = None) -> dict:
+def get_max_data_month(_conn, access_filter: str, year: int, clients: tuple = None) -> int:
+    """Get the latest month that has data for the given year (for fair YoY comparison)."""
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
+    sql = f"""
+        SELECT MAX(DATA_MONTH) AS MAX_MONTH
+        FROM {SCORECARD_TABLE}
+        WHERE {where} AND DATA_MONTH IS NOT NULL
+    """
+    df = _run(_conn, sql)
+    if df.empty or df.iloc[0]["MAX_MONTH"] is None:
+        return 12
+    return int(df.iloc[0]["MAX_MONTH"])
+
+
+@st.cache_data(ttl=600)
+def get_scorecard_kpis(_conn, access_filter: str, year: int,
+                       clients: tuple = None, max_month: int = None) -> dict:
+    where = _build_scorecard_where(access_filter, years=[year],
+                                   clients=list(clients) if clients else None)
+    if max_month:
+        where += f" AND DATA_MONTH <= {max_month}"
     sql = f"""
         SELECT
             SUM(DOLLARS) AS TOTAL_DOLLARS,
@@ -122,8 +141,9 @@ def get_scorecard_kpis(_conn, access_filter: str, year: int, clients: tuple = No
 
 
 @st.cache_data(ttl=600)
-def get_scorecard_kpis_prior_year(_conn, access_filter: str, year: int, clients: tuple = None) -> dict:
-    return get_scorecard_kpis(_conn, access_filter, year - 1, clients)
+def get_scorecard_kpis_prior_year(_conn, access_filter: str, year: int,
+                                  clients: tuple = None, max_month: int = None) -> dict:
+    return get_scorecard_kpis(_conn, access_filter, year - 1, clients, max_month)
 
 
 @st.cache_data(ttl=600)

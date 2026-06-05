@@ -18,7 +18,8 @@ from utils.scorecard_data import (
     get_growth_heatmap, get_category_breakdown, get_item_performance,
     get_category_yoy, get_top_customers, get_distributor_brand_split,
     get_parent_distributor_breakdown, get_customer_churn,
-    get_client_market_share, get_state_breakdown, SCORECARD_TABLE,
+    get_client_market_share, get_state_breakdown, get_max_data_month,
+    SCORECARD_TABLE,
 )
 from utils.auth import get_access_display
 
@@ -124,14 +125,21 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: EXECUTIVE DASHBOARD
 # ═══════════════════════════════════════════════
 with tab1:
-    kpis = get_scorecard_kpis(conn, access_filter, selected_year, clients_tuple)
-    kpis_py = get_scorecard_kpis_prior_year(conn, access_filter, selected_year, clients_tuple)
+    # Get the max month with data for current year (for fair YoY comparison)
+    max_month = get_max_data_month(conn, access_filter, selected_year, clients_tuple)
+
+    kpis = get_scorecard_kpis(conn, access_filter, selected_year, clients_tuple, max_month)
+    kpis_py = get_scorecard_kpis_prior_year(conn, access_filter, selected_year, clients_tuple, max_month)
 
     def _delta(current, prior):
         if prior and prior > 0:
             pct = ((current - prior) / prior) * 100
             return f"{pct:+.1f}%"
         return None
+
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    compare_label = f"Months 1-{max_month} ({month_names[max_month-1]}) vs Prior Year Same Period"
+    st.caption(compare_label)
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -158,6 +166,8 @@ with tab1:
         trend_df = get_monthly_trend(conn, access_filter, (selected_year, selected_year - 1),
                                      clients_tuple, categories_tuple)
         if not trend_df.empty:
+            # Only show months up to max_month for fair comparison
+            trend_df = trend_df[trend_df["DATA_MONTH"] <= max_month]
             trend_df["PERIOD"] = trend_df["DATA_YEAR"].astype(str) + "-" + trend_df["DATA_MONTH"].astype(str).str.zfill(2)
             fig = px.line(trend_df, x="DATA_MONTH", y="DOLLARS", color="DATA_YEAR",
                           labels={"DATA_MONTH": "Month", "DOLLARS": "Dollars", "DATA_YEAR": "Year"},
