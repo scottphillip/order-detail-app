@@ -20,6 +20,7 @@ from utils.scorecard_data import (
     get_category_yoy, get_top_customers, get_distributor_brand_split,
     get_parent_distributor_breakdown, get_customer_churn,
     get_client_market_share, get_state_breakdown, get_max_data_month,
+    get_client_month_discrepancies,
     SCORECARD_TABLE,
 )
 from utils.auth import get_access_display
@@ -221,6 +222,35 @@ with tab1:
         else:
             st.info("No client data.")
 
+    # Client Discrepancy Alerts
+    st.markdown("---")
+    st.subheader("Client Month-to-Month Discrepancies")
+    st.caption("Clients with >40% YoY change in any single month (flagging data gaps or unusual swings)")
+    disc_df = get_client_month_discrepancies(conn, access_filter, selected_year, max_month, clients_tuple)
+    if not disc_df.empty:
+        month_names_short = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        disc_df["MONTH"] = disc_df["DATA_MONTH"].apply(
+            lambda m: month_names_short[int(m) - 1] if pd.notnull(m) else "?"
+        )
+        disc_df["CHANGE"] = disc_df["YOY_PCT"].apply(
+            lambda x: f"+{x:.0f}%" if x > 0 else f"{x:.0f}%"
+        )
+        display_cols = ["CLIENT_NAME", "MONTH", "CY_CASES", "PY_CASES", "CHANGE"]
+        st.dataframe(
+            disc_df[display_cols].head(20),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "CLIENT_NAME": "Client",
+                "MONTH": "Month",
+                "CY_CASES": st.column_config.NumberColumn(f"{selected_year} Cases", format="%.0f"),
+                "PY_CASES": st.column_config.NumberColumn(f"{selected_year-1} Cases", format="%.0f"),
+                "CHANGE": "YoY Change",
+            }
+        )
+    else:
+        st.success("No significant month-to-month discrepancies detected.")
+
 
 # ═══════════════════════════════════════════════
 # TAB 2: TRENDS & PREDICTIONS
@@ -379,7 +409,17 @@ with tab2:
 with tab3:
     st.subheader("Category Performance")
 
-    cat_df = get_category_breakdown(conn, access_filter, selected_year, clients_tuple)
+    # Manufacturer/Client filter for this tab
+    tab3_clients = st.multiselect(
+        "Filter by Manufacturer",
+        options=all_clients,
+        default=None,
+        placeholder="All Manufacturers",
+        key="tab3_client_filter"
+    )
+    tab3_clients_tuple = tuple(tab3_clients) if tab3_clients else clients_tuple
+
+    cat_df = get_category_breakdown(conn, access_filter, selected_year, tab3_clients_tuple)
     if not cat_df.empty and METRIC_COL in cat_df.columns:
         col_cat, col_yoy = st.columns([1, 1])
 
@@ -400,7 +440,7 @@ with tab3:
 
         with col_yoy:
             st.markdown("**Category YoY Growth**")
-            yoy_df = get_category_yoy(conn, access_filter, selected_year, clients_tuple)
+            yoy_df = get_category_yoy(conn, access_filter, selected_year, tab3_clients_tuple)
             if not yoy_df.empty:
                 cy_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year].set_index("ITEM_CATEGORY")["CASES"]
                 py_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year - 1].set_index("ITEM_CATEGORY")["CASES"]
@@ -427,7 +467,7 @@ with tab3:
     st.markdown("---")
     st.subheader(f"Declining Items (3+ Consecutive Months of {metric_choice} Decline)")
 
-    item_df = get_item_performance(conn, access_filter, (selected_year - 1, selected_year), clients_tuple)
+    item_df = get_item_performance(conn, access_filter, (selected_year - 1, selected_year), tab3_clients_tuple)
     if not item_df.empty:
         def detect_declining(group):
             """Detect items with 3+ consecutive months of decline."""
@@ -808,3 +848,9 @@ with tab6:
         ]
         for ex in examples:
             st.markdown(f"- _{ex}_")
+
+# ═══════════════════════════════════════════════
+# FLOATING CHATBOT WIDGET (bottom-right corner)
+# ═══════════════════════════════════════════════
+from utils.chatbot_widget import render_floating_chatbot
+render_floating_chatbot(conn)

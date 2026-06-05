@@ -307,12 +307,17 @@ def get_top_customers(_conn, access_filter: str, year: int,
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT REFERENCE_CUSTOMER_NAME, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES,
-            SUM(LBS) AS LBS, COUNT(DISTINCT CLIENT_NAME) AS CLIENTS_SERVED
-        FROM {SCORECARD_TABLE}
-        WHERE {where} AND REFERENCE_CUSTOMER_NAME IS NOT NULL AND TRIM(REFERENCE_CUSTOMER_NAME) != ''
-        GROUP BY REFERENCE_CUSTOMER_NAME
-        ORDER BY DOLLARS DESC
+        SELECT REFERENCE_CUSTOMER_NAME, DOLLARS, CASES, LBS, CLIENTS_SERVED
+        FROM (
+            SELECT REFERENCE_CUSTOMER_NAME,
+                SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES,
+                SUM(LBS) AS LBS, COUNT(DISTINCT CLIENT_NAME) AS CLIENTS_SERVED
+            FROM {SCORECARD_TABLE}
+            WHERE {where} AND REFERENCE_CUSTOMER_NAME IS NOT NULL AND TRIM(REFERENCE_CUSTOMER_NAME) != ''
+            GROUP BY REFERENCE_CUSTOMER_NAME
+        )
+        WHERE COALESCE(CASES, 0) > 0 OR COALESCE(DOLLARS, 0) > 0
+        ORDER BY COALESCE(CASES, 0) DESC
         LIMIT {limit}
     """
     return _run(_conn, sql)
@@ -408,5 +413,48 @@ def get_state_breakdown(_conn, access_filter: str, year: int,
         WHERE {where} AND REFERENCE_STATE IS NOT NULL AND TRIM(REFERENCE_STATE) != ''
         GROUP BY REFERENCE_STATE
         ORDER BY DOLLARS DESC
+    """
+    return _run(_conn, sql)
+
+
+@st.cache_data(ttl=600)
+def get_client_month_discrepancies(_conn, access_filter: str, year: int,
+                                   max_month: int, clients: tuple = None) -> pd.DataFrame:
+    """Find clients with high MoM discrepancies between CY and PY for same months.
+    Returns clients where any single month has >40% YoY change."""
+    where_cy = _build_scorecard_where(access_filter, years=[year],
+                                      clients=list(clients) if clients else None)
+    where_py = _build_scorecard_where(access_filter, years=[year - 1],
+                                      clients=list(clients) if clients else None)
+    sql = f"""
+        WITH cy AS (
+            SELECT CLIENT_NAME, DATA_MONTH, SUM(CASES) AS CASES
+            FROM {SCORECARD_TABLE}
+            WHERE {where_cy} AND DATA_MONTH IS NOT NULL AND DATA_MONTH <= {max_month}
+            GROUP BY CLIENT_NAME, DATA_MONTH
+        ),
+        py AS (
+            SELECT CLIENT_NAME, DATA_MONTH, SUM(CASES) AS CASES
+            FROM {SCORECARD_TABLE}
+            WHERE {where_py} AND DATA_MONTH IS NOT NULL AND DATA_MONTH <= {max_month}
+            GROUP BY CLIENT_NAME, DATA_MONTH
+        ),
+        compared AS (
+            SELECT
+                COALESCE(cy.CLIENT_NAME, py.CLIENT_NAME) AS CLIENT_NAME,
+                COALESCE(cy.DATA_MONTH, py.DATA_MONTH) AS DATA_MONTH,
+                COALESCE(cy.CASES, 0) AS CY_CASES,
+                COALESCE(py.CASES, 0) AS PY_CASES,
+                CASE WHEN COALESCE(py.CASES, 0) > 0
+                     THEN ((COALESCE(cy.CASES, 0) - py.CASES) / py.CASES * 100)
+                     ELSE NULL END AS YOY_PCT
+            FROM cy
+            FULL OUTER JOIN py ON cy.CLIENT_NAME = py.CLIENT_NAME AND cy.DATA_MONTH = py.DATA_MONTH
+        )
+        SELECT CLIENT_NAME, DATA_MONTH, CY_CASES, PY_CASES, ROUND(YOY_PCT, 1) AS YOY_PCT
+        FROM compared
+        WHERE ABS(YOY_PCT) > 40 AND COALESCE(PY_CASES, 0) > 100
+        ORDER BY ABS(YOY_PCT) DESC
+        LIMIT 30
     """
     return _run(_conn, sql)
