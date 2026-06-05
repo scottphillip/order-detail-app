@@ -81,6 +81,8 @@ with st.sidebar:
         st.switch_page("pages/1_Order_Detail.py")
     if st.button("Manufacturer Compare", use_container_width=True, key="nav_compare"):
         st.switch_page("pages/2_Manufacturer_Compare.py")
+    if st.button("Scorecard Analytics", use_container_width=True, key="nav_scorecard"):
+        st.switch_page("pages/4_Scorecard_Analytics.py")
     st.markdown("---")
 
     available_years = get_available_years(conn, territory_filter)

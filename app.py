@@ -107,6 +107,8 @@ with st.sidebar:
         st.switch_page("pages/2_Manufacturer_Compare.py")
     if st.button("Period Compare", use_container_width=True):
         st.switch_page("pages/3_Period_Compare.py")
+    if st.button("Scorecard Analytics", use_container_width=True):
+        st.switch_page("pages/4_Scorecard_Analytics.py")
     st.markdown("---")
     if st.button("Sign Out"):
         del st.session_state.user
@@ -138,7 +140,7 @@ st.markdown("### What would you like to explore?")
 st.markdown("")
 
 # Navigation cards
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("""
@@ -164,6 +166,8 @@ with col2:
     if st.button("Open Comparison →", use_container_width=True, key="card_compare"):
         st.switch_page("pages/2_Manufacturer_Compare.py")
 
+col3, col4 = st.columns(2)
+
 with col3:
     st.markdown("""
     <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
@@ -175,6 +179,18 @@ with col3:
     """, unsafe_allow_html=True)
     if st.button("Open Period Compare →", use_container_width=True, key="card_period"):
         st.switch_page("pages/3_Period_Compare.py")
+
+with col4:
+    st.markdown("""
+    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
+                color: white; min-height: 200px; border-left: 5px solid #4CAF50;">
+        <h3 style="color: #4CAF50; margin-top: 0;">Scorecard Analytics</h3>
+        <p style="color: #CCCCCC;">Deep analytics across all 57 manufacturer clients — 
+        trends, predictions, failing item detection, category breakdowns, and anomaly alerts.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Open Scorecard Analytics →", use_container_width=True, key="card_scorecard"):
+        st.switch_page("pages/4_Scorecard_Analytics.py")
 
 st.markdown("---")
 st.caption("Affinity Group | Insights & Analytics | Powered by Snowflake + Cortex AI")

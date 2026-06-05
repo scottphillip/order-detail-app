@@ -91,6 +91,8 @@ with st.sidebar:
         st.switch_page("pages/2_Manufacturer_Compare.py")
     if st.button("Period Compare", use_container_width=True, key="nav_period"):
         st.switch_page("pages/3_Period_Compare.py")
+    if st.button("Scorecard Analytics", use_container_width=True, key="nav_scorecard"):
+        st.switch_page("pages/4_Scorecard_Analytics.py")
     st.markdown("---")
 
     st.markdown("#### Filters")
