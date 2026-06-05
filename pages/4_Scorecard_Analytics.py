@@ -519,7 +519,7 @@ with tab4:
         st.subheader(f"Top 20 Customers ({selected_year})")
         cust_df = get_top_customers(conn, access_filter, selected_year, clients_tuple)
         if not cust_df.empty:
-            fig = px.bar(cust_df, x=METRIC_COL, y="REFERENCE_CUSTOMER_NAME", orientation="h",
+            fig = px.bar(cust_df, x=METRIC_COL, y="CUSTOMER_DISPLAY_NAME", orientation="h",
                          color_discrete_sequence=[ORANGE])
             fig.update_layout(
                 yaxis=dict(autorange="reversed"), xaxis_tickformat=METRIC_FMT,
