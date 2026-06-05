@@ -102,13 +102,27 @@ def _build_scorecard_where(access_filter: str, years: list = None,
 
 @st.cache_data(ttl=600)
 def get_max_data_month(_conn, access_filter: str, year: int, clients: tuple = None) -> int:
-    """Get the latest month that has data for the given year (for fair YoY comparison)."""
+    """Get the last COMPLETE month for fair YoY comparison.
+    
+    A month is considered complete if it has at least 70% of the client count
+    of the peak month that year. This avoids comparing partial months
+    (e.g. only 2 clients reported in June vs 50+ in prior months).
+    """
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT MAX(DATA_MONTH) AS MAX_MONTH
-        FROM {SCORECARD_TABLE}
-        WHERE {where} AND DATA_MONTH IS NOT NULL
+        WITH monthly_clients AS (
+            SELECT DATA_MONTH, COUNT(DISTINCT CLIENT_NAME) AS CLIENT_COUNT
+            FROM {SCORECARD_TABLE}
+            WHERE {where} AND DATA_MONTH IS NOT NULL
+            GROUP BY DATA_MONTH
+        ),
+        peak AS (
+            SELECT MAX(CLIENT_COUNT) AS PEAK_CLIENTS FROM monthly_clients
+        )
+        SELECT MAX(mc.DATA_MONTH) AS MAX_MONTH
+        FROM monthly_clients mc, peak p
+        WHERE mc.CLIENT_COUNT >= p.PEAK_CLIENTS * 0.7
     """
     df = _run(_conn, sql)
     if df.empty or df.iloc[0]["MAX_MONTH"] is None:
@@ -129,7 +143,7 @@ def get_scorecard_kpis(_conn, access_filter: str, year: int,
             SUM(CASES) AS TOTAL_CASES,
             SUM(LBS) AS TOTAL_LBS,
             COUNT(DISTINCT CLIENT_NAME) AS CLIENT_COUNT,
-            COUNT(DISTINCT CUSTOMER_NAME) AS CUSTOMER_COUNT
+            COUNT(DISTINCT REFERENCE_CUSTOMER_NAME) AS CUSTOMER_COUNT
         FROM {SCORECARD_TABLE}
         WHERE {where}
     """
@@ -274,7 +288,7 @@ def get_category_yoy(_conn, access_filter: str, year: int,
     where = _build_scorecard_where(access_filter, years=yrs,
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT ITEM_CATEGORY, DATA_YEAR, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES
+        SELECT ITEM_CATEGORY, DATA_YEAR, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES, SUM(LBS) AS LBS
         FROM {SCORECARD_TABLE}
         WHERE {where} AND ITEM_CATEGORY IS NOT NULL AND TRIM(ITEM_CATEGORY) != ''
         GROUP BY ITEM_CATEGORY, DATA_YEAR
@@ -293,11 +307,11 @@ def get_top_customers(_conn, access_filter: str, year: int,
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT CUSTOMER_NAME, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES,
-            COUNT(DISTINCT CLIENT_NAME) AS CLIENTS_SERVED
+        SELECT REFERENCE_CUSTOMER_NAME, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES,
+            SUM(LBS) AS LBS, COUNT(DISTINCT CLIENT_NAME) AS CLIENTS_SERVED
         FROM {SCORECARD_TABLE}
-        WHERE {where} AND CUSTOMER_NAME IS NOT NULL AND TRIM(CUSTOMER_NAME) != ''
-        GROUP BY CUSTOMER_NAME
+        WHERE {where} AND REFERENCE_CUSTOMER_NAME IS NOT NULL AND TRIM(REFERENCE_CUSTOMER_NAME) != ''
+        GROUP BY REFERENCE_CUSTOMER_NAME
         ORDER BY DOLLARS DESC
         LIMIT {limit}
     """
@@ -310,7 +324,7 @@ def get_distributor_brand_split(_conn, access_filter: str, year: int,
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT DISTRIBUTOR_BRAND, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES
+        SELECT DISTRIBUTOR_BRAND, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES, SUM(LBS) AS LBS
         FROM {SCORECARD_TABLE}
         WHERE {where} AND DISTRIBUTOR_BRAND IS NOT NULL
         GROUP BY DISTRIBUTOR_BRAND
@@ -326,7 +340,7 @@ def get_parent_distributor_breakdown(_conn, access_filter: str, year: int,
                                    clients=list(clients) if clients else None)
     sql = f"""
         SELECT REFERENCE_PARENT_DISTRIBUTOR, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES,
-            COUNT(DISTINCT CUSTOMER_NAME) AS CUSTOMER_COUNT
+            SUM(LBS) AS LBS, COUNT(DISTINCT REFERENCE_CUSTOMER_NAME) AS CUSTOMER_COUNT
         FROM {SCORECARD_TABLE}
         WHERE {where} AND REFERENCE_PARENT_DISTRIBUTOR IS NOT NULL
         GROUP BY REFERENCE_PARENT_DISTRIBUTOR
@@ -346,16 +360,16 @@ def get_customer_churn(_conn, access_filter: str, current_year: int,
                                       clients=list(clients) if clients else None)
     sql = f"""
         WITH cy AS (
-            SELECT DISTINCT CUSTOMER_NAME FROM {SCORECARD_TABLE}
-            WHERE {where_cy} AND CUSTOMER_NAME IS NOT NULL AND TRIM(CUSTOMER_NAME) != ''
+            SELECT DISTINCT REFERENCE_CUSTOMER_NAME FROM {SCORECARD_TABLE}
+            WHERE {where_cy} AND REFERENCE_CUSTOMER_NAME IS NOT NULL AND TRIM(REFERENCE_CUSTOMER_NAME) != ''
         ),
         py AS (
-            SELECT DISTINCT CUSTOMER_NAME FROM {SCORECARD_TABLE}
-            WHERE {where_py} AND CUSTOMER_NAME IS NOT NULL AND TRIM(CUSTOMER_NAME) != ''
+            SELECT DISTINCT REFERENCE_CUSTOMER_NAME FROM {SCORECARD_TABLE}
+            WHERE {where_py} AND REFERENCE_CUSTOMER_NAME IS NOT NULL AND TRIM(REFERENCE_CUSTOMER_NAME) != ''
         )
         SELECT
-            (SELECT COUNT(*) FROM cy WHERE CUSTOMER_NAME NOT IN (SELECT CUSTOMER_NAME FROM py)) AS NEW_CUSTOMERS,
-            (SELECT COUNT(*) FROM py WHERE CUSTOMER_NAME NOT IN (SELECT CUSTOMER_NAME FROM cy)) AS CHURNED_CUSTOMERS,
+            (SELECT COUNT(*) FROM cy WHERE REFERENCE_CUSTOMER_NAME NOT IN (SELECT REFERENCE_CUSTOMER_NAME FROM py)) AS NEW_CUSTOMERS,
+            (SELECT COUNT(*) FROM py WHERE REFERENCE_CUSTOMER_NAME NOT IN (SELECT REFERENCE_CUSTOMER_NAME FROM cy)) AS CHURNED_CUSTOMERS,
             (SELECT COUNT(*) FROM cy) AS CURRENT_CUSTOMERS,
             (SELECT COUNT(*) FROM py) AS PRIOR_CUSTOMERS
     """
@@ -389,7 +403,7 @@ def get_state_breakdown(_conn, access_filter: str, year: int,
     where = _build_scorecard_where(access_filter, years=[year],
                                    clients=list(clients) if clients else None)
     sql = f"""
-        SELECT REFERENCE_STATE, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES
+        SELECT REFERENCE_STATE, SUM(DOLLARS) AS DOLLARS, SUM(CASES) AS CASES, SUM(LBS) AS LBS
         FROM {SCORECARD_TABLE}
         WHERE {where} AND REFERENCE_STATE IS NOT NULL AND TRIM(REFERENCE_STATE) != ''
         GROUP BY REFERENCE_STATE

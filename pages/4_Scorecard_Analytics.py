@@ -1,7 +1,8 @@
 """
 Scorecard Analytics Hub - Deep analytics across all manufacturer clients.
-Features: Executive dashboard, trend analysis with Cortex FORECAST,
-item/category performance, customer analysis, and comparative intelligence.
+Features: Executive dashboard, trend analysis with forecasting,
+item/category performance, customer analysis, comparative intelligence,
+and Cortex Analyst chatbot.
 """
 import streamlit as st
 import plotly.express as px
@@ -69,6 +70,7 @@ access_filter = get_scorecard_access_filter(user)
 # Brand colors
 ORANGE = "#F5921E"
 CHARCOAL = "#2D2D2D"
+GREEN = "#4CAF50"
 
 # ─── Sidebar ───
 with st.sidebar:
@@ -90,6 +92,20 @@ with st.sidebar:
     default_idx = available_years.index(current_year) if current_year in available_years else 0
     selected_year = st.selectbox("Analysis Year", options=available_years, index=default_idx)
 
+    # Metric Toggle - Cases is the default
+    metric_choice = st.radio(
+        "Primary Metric",
+        options=["Cases", "Dollars", "LBS"],
+        index=0,
+        horizontal=True,
+        key="metric_toggle"
+    )
+    METRIC_COL = {"Cases": "CASES", "Dollars": "DOLLARS", "LBS": "LBS"}[metric_choice]
+    METRIC_FMT = {"Cases": ",.0f", "Dollars": "$,.0f", "LBS": ",.0f"}[metric_choice]
+    METRIC_PREFIX = {"Cases": "", "Dollars": "$", "LBS": ""}[metric_choice]
+
+    st.markdown("---")
+
     all_clients = get_scorecard_clients(conn, access_filter)
     selected_clients = st.multiselect("Clients", options=all_clients, default=None,
                                       placeholder="All Clients")
@@ -105,19 +121,31 @@ with st.sidebar:
                                          placeholder="All Categories")
     categories_tuple = tuple(selected_categories) if selected_categories else None
 
+
+# ─── Helper: format metric value ───
+def fmt_metric(val):
+    """Format a metric value based on the selected metric."""
+    if val is None:
+        return f"{METRIC_PREFIX}0"
+    if METRIC_COL == "DOLLARS":
+        return f"${val:,.0f}"
+    return f"{val:,.0f}"
+
+
 # ─── Header ───
 st.markdown(f"""
-<div style="background: {CHARCOAL}; padding: 15px 25px; border-radius: 10px; margin-bottom: 20px;">
-    <span style="color: {ORANGE}; font-size: 24px; font-weight: bold;">SCORECARD</span>
-    <span style="color: #FFFFFF; font-size: 24px; font-weight: 300;"> ANALYTICS</span>
-    <span style="color: #888; font-size: 14px; margin-left: 20px;">57 Clients | {selected_year}</span>
+<div style="background: {CHARCOAL}; padding: 12px 25px; border-radius: 10px; margin-bottom: 15px;">
+    <span style="color: {ORANGE}; font-size: 22px; font-weight: bold;">SCORECARD</span>
+    <span style="color: #FFFFFF; font-size: 22px; font-weight: 300;"> ANALYTICS</span>
+    <span style="color: #888; font-size: 13px; margin-left: 20px;">57 Clients | {selected_year} | Metric: {metric_choice}</span>
 </div>
 """, unsafe_allow_html=True)
 
 # ─── Tabs ───
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Executive Dashboard", "Trends & Predictions",
-    "Item & Category", "Customer & Distributor", "Comparative Intelligence"
+    "Item & Category", "Customer & Distributor", "Comparative Intelligence",
+    "Ask Data"
 ])
 
 
@@ -125,9 +153,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: EXECUTIVE DASHBOARD
 # ═══════════════════════════════════════════════
 with tab1:
-    # Get the max month with data for current year (for fair YoY comparison)
     max_month = get_max_data_month(conn, access_filter, selected_year, clients_tuple)
-
     kpis = get_scorecard_kpis(conn, access_filter, selected_year, clients_tuple, max_month)
     kpis_py = get_scorecard_kpis_prior_year(conn, access_filter, selected_year, clients_tuple, max_month)
 
@@ -137,17 +163,18 @@ with tab1:
             return f"{pct:+.1f}%"
         return None
 
-    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    compare_label = f"Months 1-{max_month} ({month_names[max_month-1]}) vs Prior Year Same Period"
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    compare_label = f"Jan\u2013{month_names[max_month-1]} {selected_year} vs Same Period {selected_year - 1}"
     st.caption(compare_label)
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Total Dollars", f"${kpis['TOTAL_DOLLARS']:,.0f}" if kpis['TOTAL_DOLLARS'] else "$0",
-                  delta=_delta(kpis['TOTAL_DOLLARS'] or 0, kpis_py['TOTAL_DOLLARS'] or 0))
-    with col2:
         st.metric("Total Cases", f"{kpis['TOTAL_CASES']:,.0f}" if kpis['TOTAL_CASES'] else "0",
                   delta=_delta(kpis['TOTAL_CASES'] or 0, kpis_py['TOTAL_CASES'] or 0))
+    with col2:
+        st.metric("Total Dollars", f"${kpis['TOTAL_DOLLARS']:,.0f}" if kpis['TOTAL_DOLLARS'] else "$0",
+                  delta=_delta(kpis['TOTAL_DOLLARS'] or 0, kpis_py['TOTAL_DOLLARS'] or 0))
     with col3:
         st.metric("Total LBS", f"{kpis['TOTAL_LBS']:,.0f}" if kpis['TOTAL_LBS'] else "0",
                   delta=_delta(kpis['TOTAL_LBS'] or 0, kpis_py['TOTAL_LBS'] or 0))
@@ -156,23 +183,24 @@ with tab1:
     with col5:
         st.metric("Customers", f"{kpis['CUSTOMER_COUNT']:,.0f}" if kpis['CUSTOMER_COUNT'] else "0")
 
-    st.markdown("---")
-
     # Monthly trend: current vs prior year
     col_chart, col_top = st.columns([3, 2])
 
     with col_chart:
-        st.subheader("Monthly Revenue Trend")
+        st.subheader(f"Monthly {metric_choice} Trend")
         trend_df = get_monthly_trend(conn, access_filter, (selected_year, selected_year - 1),
                                      clients_tuple, categories_tuple)
         if not trend_df.empty:
-            # Only show months up to max_month for fair comparison
             trend_df = trend_df[trend_df["DATA_MONTH"] <= max_month]
-            trend_df["PERIOD"] = trend_df["DATA_YEAR"].astype(str) + "-" + trend_df["DATA_MONTH"].astype(str).str.zfill(2)
-            fig = px.line(trend_df, x="DATA_MONTH", y="DOLLARS", color="DATA_YEAR",
-                          labels={"DATA_MONTH": "Month", "DOLLARS": "Dollars", "DATA_YEAR": "Year"},
+            fig = px.line(trend_df, x="DATA_MONTH", y=METRIC_COL, color="DATA_YEAR",
+                          labels={"DATA_MONTH": "Month", METRIC_COL: metric_choice, "DATA_YEAR": "Year"},
                           color_discrete_sequence=[ORANGE, "#888888"])
-            fig.update_layout(xaxis=dict(dtick=1), yaxis_tickformat="$,.0f", height=350)
+            fig.update_layout(
+                xaxis=dict(dtick=1, tickvals=list(range(1, max_month + 1)),
+                           ticktext=month_names[:max_month]),
+                yaxis_tickformat=METRIC_FMT, height=340,
+                margin=dict(t=10, b=30)
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No trend data available for selected filters.")
@@ -181,10 +209,14 @@ with tab1:
         st.subheader(f"Top 10 Clients ({selected_year})")
         top_df = get_top_clients(conn, access_filter, selected_year)
         if not top_df.empty:
-            fig = px.bar(top_df, x="DOLLARS", y="CLIENT_NAME", orientation="h",
+            fig = px.bar(top_df, x=METRIC_COL, y="CLIENT_NAME", orientation="h",
                          color_discrete_sequence=[ORANGE])
-            fig.update_layout(yaxis=dict(autorange="reversed"), xaxis_tickformat="$,.0f",
-                              height=350, showlegend=False)
+            fig.update_layout(
+                yaxis=dict(autorange="reversed"),
+                xaxis_tickformat=METRIC_FMT,
+                height=340, showlegend=False,
+                margin=dict(t=10, b=30)
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No client data.")
@@ -207,63 +239,67 @@ with tab2:
 
         if not client_trend.empty:
             client_trend["PERIOD"] = pd.to_datetime(
-                client_trend["DATA_YEAR"].astype(str) + "-" + client_trend["DATA_MONTH"].astype(str).str.zfill(2) + "-01"
+                client_trend["DATA_YEAR"].astype(str) + "-" +
+                client_trend["DATA_MONTH"].astype(str).str.zfill(2) + "-01"
             )
-            fig = px.line(client_trend, x="PERIOD", y="DOLLARS", color="CLIENT_NAME",
-                          labels={"PERIOD": "", "DOLLARS": "Dollars"},
+            fig = px.line(client_trend, x="PERIOD", y=METRIC_COL, color="CLIENT_NAME",
+                          labels={"PERIOD": "", METRIC_COL: metric_choice},
                           color_discrete_sequence=px.colors.qualitative.Set2)
-            fig.update_layout(yaxis_tickformat="$,.0f", height=400)
+            fig.update_layout(yaxis_tickformat=METRIC_FMT, height=380,
+                              margin=dict(t=10, b=30))
             st.plotly_chart(fig, use_container_width=True)
 
-            # Python rolling average
-            st.markdown("#### Rolling 3-Month Average")
+            # Rolling average
+            st.markdown(f"**Rolling 3-Month Average ({metric_choice})**")
             for client in trend_clients:
                 cdf = client_trend[client_trend["CLIENT_NAME"] == client].copy()
                 cdf = cdf.sort_values("PERIOD")
-                cdf["MA3"] = cdf["DOLLARS"].rolling(3, min_periods=1).mean()
+                cdf["MA3"] = cdf[METRIC_COL].rolling(3, min_periods=1).mean()
                 client_trend.loc[client_trend["CLIENT_NAME"] == client, "MA3"] = cdf["MA3"].values
 
             fig2 = px.line(client_trend, x="PERIOD", y="MA3", color="CLIENT_NAME",
-                           labels={"PERIOD": "", "MA3": "3-Month Avg ($)"},
-                           color_discrete_sequence=px.colors.qualitative.Set2, line_dash_sequence=["dash"])
-            fig2.update_layout(yaxis_tickformat="$,.0f", height=300)
+                           labels={"PERIOD": "", "MA3": f"3-Mo Avg ({metric_choice})"},
+                           color_discrete_sequence=px.colors.qualitative.Set2,
+                           line_dash_sequence=["dash"])
+            fig2.update_layout(yaxis_tickformat=METRIC_FMT, height=280,
+                               margin=dict(t=10, b=30))
             st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("No trend data for selected clients.")
 
-    # Cortex Forecast
+    # Forecast Section
     st.markdown("---")
-    st.subheader("Revenue Forecast (Cortex ML)")
+    st.subheader(f"{metric_choice} Forecast (Exponential Smoothing)")
     forecast_client = st.selectbox("Forecast for client:", options=all_clients, key="forecast_client")
     if forecast_client and st.button("Generate 3-Month Forecast", key="btn_forecast"):
-        with st.spinner("Running Cortex FORECAST..."):
+        with st.spinner("Calculating forecast..."):
             try:
+                escaped_client = forecast_client.replace(chr(39), chr(39)+chr(39))
                 forecast_sql = f"""
                     WITH monthly_agg AS (
                         SELECT
                             DATE_FROM_PARTS(DATA_YEAR, DATA_MONTH, 1) AS PERIOD_DATE,
-                            SUM(DOLLARS) AS DOLLARS
+                            SUM({METRIC_COL}) AS METRIC_VALUE
                         FROM {SCORECARD_TABLE}
                         WHERE {access_filter}
-                          AND CLIENT_NAME = '{forecast_client.replace(chr(39), chr(39)+chr(39))}'
+                          AND CLIENT_NAME = '{escaped_client}'
                           AND DATA_YEAR >= {selected_year - 2}
                           AND DATA_MONTH IS NOT NULL
                         GROUP BY DATA_YEAR, DATA_MONTH
                         ORDER BY PERIOD_DATE
                     )
-                    SELECT PERIOD_DATE, DOLLARS FROM monthly_agg
+                    SELECT PERIOD_DATE, METRIC_VALUE FROM monthly_agg
                 """
                 cur = conn.cursor()
                 cur.execute(forecast_sql)
                 hist_df = cur.fetch_pandas_all()
 
                 if len(hist_df) >= 6:
-                    # Use Python-based exponential smoothing as fallback
                     hist_df["PERIOD_DATE"] = pd.to_datetime(hist_df["PERIOD_DATE"])
                     hist_df = hist_df.sort_values("PERIOD_DATE")
 
-                    # Simple exponential smoothing forecast
-                    values = hist_df["DOLLARS"].values
+                    # Exponential smoothing
+                    values = hist_df["METRIC_VALUE"].astype(float).values
                     alpha = 0.3
                     smoothed = [values[0]]
                     for v in values[1:]:
@@ -271,26 +307,40 @@ with tab2:
 
                     last_date = hist_df["PERIOD_DATE"].max()
                     forecast_dates = pd.date_range(last_date + pd.offsets.MonthBegin(1), periods=3, freq="MS")
-                    forecast_vals = [smoothed[-1]] * 3
-                    # Apply trend
                     trend = (smoothed[-1] - smoothed[-4]) / 3 if len(smoothed) >= 4 else 0
                     forecast_vals = [smoothed[-1] + trend * (i + 1) for i in range(3)]
 
-                    forecast_df = pd.DataFrame({"PERIOD_DATE": forecast_dates, "DOLLARS": forecast_vals})
-                    forecast_df["TYPE"] = "Forecast"
+                    # Build combined df - bridge last actual point into forecast for connected line
                     hist_df["TYPE"] = "Actual"
+                    hist_df = hist_df.rename(columns={"METRIC_VALUE": "VALUE"})
 
-                    combined = pd.concat([hist_df[["PERIOD_DATE", "DOLLARS", "TYPE"]], forecast_df])
+                    # Bridge point: last actual appears in both series
+                    bridge_row = pd.DataFrame({
+                        "PERIOD_DATE": [last_date],
+                        "VALUE": [float(values[-1])],
+                        "TYPE": ["Forecast"]
+                    })
+                    forecast_df = pd.DataFrame({
+                        "PERIOD_DATE": forecast_dates,
+                        "VALUE": forecast_vals,
+                        "TYPE": ["Forecast"] * 3
+                    })
+                    forecast_df = pd.concat([bridge_row, forecast_df], ignore_index=True)
 
-                    fig = px.line(combined, x="PERIOD_DATE", y="DOLLARS", color="TYPE",
-                                  color_discrete_map={"Actual": ORANGE, "Forecast": "#4CAF50"},
-                                  labels={"PERIOD_DATE": "", "DOLLARS": "Revenue"})
-                    fig.update_layout(yaxis_tickformat="$,.0f", height=350)
+                    combined = pd.concat([hist_df[["PERIOD_DATE", "VALUE", "TYPE"]], forecast_df],
+                                         ignore_index=True)
+
+                    fig = px.line(combined, x="PERIOD_DATE", y="VALUE", color="TYPE",
+                                  color_discrete_map={"Actual": ORANGE, "Forecast": GREEN},
+                                  labels={"PERIOD_DATE": "", "VALUE": metric_choice})
+                    fig.update_traces(selector=dict(name="Forecast"), line=dict(dash="dash"))
+                    fig.update_layout(yaxis_tickformat=METRIC_FMT, height=350,
+                                      margin=dict(t=10, b=30))
                     st.plotly_chart(fig, use_container_width=True)
 
-                    st.markdown("**Forecast (next 3 months):**")
+                    st.markdown(f"**Forecast (next 3 months):**")
                     for d, v in zip(forecast_dates, forecast_vals):
-                        st.write(f"- {d.strftime('%B %Y')}: **${v:,.0f}**")
+                        st.write(f"- {d.strftime('%B %Y')}: **{fmt_metric(v)}**")
                 else:
                     st.warning("Insufficient data for forecasting (need at least 6 months).")
             except Exception as e:
@@ -298,7 +348,7 @@ with tab2:
 
     # Growth heatmap
     st.markdown("---")
-    st.subheader("YoY Growth Heatmap by Client")
+    st.subheader(f"YoY {metric_choice} Growth Heatmap by Client")
     heatmap_df = get_growth_heatmap(conn, access_filter, selected_year, clients_tuple)
     if not heatmap_df.empty:
         pivot_cy = heatmap_df[heatmap_df["DATA_YEAR"] == selected_year].pivot_table(
@@ -310,7 +360,6 @@ with tab2:
         growth = growth.dropna(how="all")
 
         if not growth.empty:
-            # Show top 15 clients by total revenue for readability
             top_clients_list = growth.mean(axis=1).sort_values(ascending=False).head(15).index
             growth_display = growth.loc[growth.index.isin(top_clients_list)]
 
@@ -318,7 +367,7 @@ with tab2:
                             labels=dict(x="Month", y="Client", color="YoY %"),
                             color_continuous_scale="RdYlGn", aspect="auto",
                             color_continuous_midpoint=0)
-            fig.update_layout(height=500)
+            fig.update_layout(height=450, margin=dict(t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Insufficient data for heatmap.")
@@ -328,53 +377,65 @@ with tab2:
 # TAB 3: ITEM & CATEGORY PERFORMANCE
 # ═══════════════════════════════════════════════
 with tab3:
-    col_cat, col_yoy = st.columns([1, 1])
+    st.subheader("Category Performance")
 
-    with col_cat:
-        st.subheader("Category Breakdown")
-        cat_df = get_category_breakdown(conn, access_filter, selected_year, clients_tuple)
-        if not cat_df.empty:
-            fig = px.treemap(cat_df.head(20), path=["ITEM_CATEGORY"], values="DOLLARS",
-                             color="DOLLARS", color_continuous_scale="Oranges")
-            fig.update_layout(height=400)
+    cat_df = get_category_breakdown(conn, access_filter, selected_year, clients_tuple)
+    if not cat_df.empty and METRIC_COL in cat_df.columns:
+        col_cat, col_yoy = st.columns([1, 1])
+
+        with col_cat:
+            st.markdown(f"**Category Breakdown by {metric_choice}**")
+            # Use bar chart instead of treemap for reliability
+            display_df = cat_df.head(15).copy()
+            display_df = display_df.sort_values(METRIC_COL, ascending=True)
+            fig = px.bar(display_df, x=METRIC_COL, y="ITEM_CATEGORY", orientation="h",
+                         color=METRIC_COL, color_continuous_scale="Oranges")
+            fig.update_layout(
+                height=400, showlegend=False,
+                xaxis_tickformat=METRIC_FMT,
+                yaxis_title="",
+                margin=dict(t=10, b=10, l=10)
+            )
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No category data.")
 
-    with col_yoy:
-        st.subheader("Category YoY Growth")
-        yoy_df = get_category_yoy(conn, access_filter, selected_year, clients_tuple)
-        if not yoy_df.empty:
-            cy_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year].set_index("ITEM_CATEGORY")["DOLLARS"]
-            py_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year - 1].set_index("ITEM_CATEGORY")["DOLLARS"]
-            growth_s = ((cy_data - py_data) / py_data * 100).dropna().sort_values()
+        with col_yoy:
+            st.markdown("**Category YoY Growth**")
+            yoy_df = get_category_yoy(conn, access_filter, selected_year, clients_tuple)
+            if not yoy_df.empty:
+                cy_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year].set_index("ITEM_CATEGORY")["CASES"]
+                py_data = yoy_df[yoy_df["DATA_YEAR"] == selected_year - 1].set_index("ITEM_CATEGORY")["CASES"]
+                growth_s = ((cy_data - py_data) / py_data * 100).dropna().sort_values()
 
-            if not growth_s.empty:
-                gdf = growth_s.reset_index()
-                gdf.columns = ["ITEM_CATEGORY", "YOY_GROWTH"]
-                gdf = gdf.tail(15)  # top 15 for readability
-                fig = px.bar(gdf, x="YOY_GROWTH", y="ITEM_CATEGORY", orientation="h",
-                             color="YOY_GROWTH", color_continuous_scale="RdYlGn",
-                             color_continuous_midpoint=0)
-                fig.update_layout(height=400, xaxis_title="YoY Growth %", showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No YoY data.")
+                if not growth_s.empty:
+                    gdf = growth_s.reset_index()
+                    gdf.columns = ["ITEM_CATEGORY", "YOY_GROWTH"]
+                    gdf = gdf.tail(15)
+                    fig = px.bar(gdf, x="YOY_GROWTH", y="ITEM_CATEGORY", orientation="h",
+                                 color="YOY_GROWTH", color_continuous_scale="RdYlGn",
+                                 color_continuous_midpoint=0)
+                    fig.update_layout(height=400, xaxis_title="YoY Growth %",
+                                      showlegend=False, margin=dict(t=10, b=10, l=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No YoY comparison data available.")
+            else:
+                st.info("No YoY data.")
+    else:
+        st.info("No category data available for selected filters.")
 
     # Failing items detection
     st.markdown("---")
-    st.subheader("Declining Items (3+ Consecutive Months of Decline)")
+    st.subheader(f"Declining Items (3+ Consecutive Months of {metric_choice} Decline)")
 
     item_df = get_item_performance(conn, access_filter, (selected_year - 1, selected_year), clients_tuple)
     if not item_df.empty:
         def detect_declining(group):
-            """Detect items with 3+ consecutive months of dollar decline."""
+            """Detect items with 3+ consecutive months of decline."""
             group = group.sort_values(["DATA_YEAR", "DATA_MONTH"])
-            dollars = group["DOLLARS"].values
-            if len(dollars) < 4:
+            vals = group["CASES"].values
+            if len(vals) < 4:
                 return False
-            # Check last N months for consecutive decline
-            recent = dollars[-6:] if len(dollars) >= 6 else dollars
+            recent = vals[-6:] if len(vals) >= 6 else vals
             consecutive = 0
             max_consecutive = 0
             for i in range(1, len(recent)):
@@ -390,18 +451,18 @@ with tab3:
         for name, group in item_groups:
             if detect_declining(group):
                 recent = group[group["DATA_YEAR"] == selected_year]
-                total = recent["DOLLARS"].sum() if not recent.empty else 0
+                total = recent["CASES"].sum() if not recent.empty else 0
                 declining_items.append({
                     "CLIENT": name[0], "ITEM": name[1],
                     "DESCRIPTION": name[2], "CATEGORY": name[3],
-                    "YTD_DOLLARS": total
+                    "YTD_CASES": total
                 })
 
         if declining_items:
-            decline_df = pd.DataFrame(declining_items).sort_values("YTD_DOLLARS", ascending=False)
+            decline_df = pd.DataFrame(declining_items).sort_values("YTD_CASES", ascending=False)
             st.dataframe(decline_df.head(30), use_container_width=True, hide_index=True,
-                         column_config={"YTD_DOLLARS": st.column_config.NumberColumn(format="$%.0f")})
-            st.caption(f"Found {len(declining_items)} items with 3+ months of consecutive revenue decline.")
+                         column_config={"YTD_CASES": st.column_config.NumberColumn(format="%.0f")})
+            st.caption(f"Found {len(declining_items)} items with 3+ months of consecutive decline.")
         else:
             st.success("No items with 3+ consecutive months of decline detected.")
     else:
@@ -418,20 +479,26 @@ with tab4:
         st.subheader(f"Top 20 Customers ({selected_year})")
         cust_df = get_top_customers(conn, access_filter, selected_year, clients_tuple)
         if not cust_df.empty:
-            fig = px.bar(cust_df, x="DOLLARS", y="CUSTOMER_NAME", orientation="h",
+            fig = px.bar(cust_df, x=METRIC_COL, y="REFERENCE_CUSTOMER_NAME", orientation="h",
                          color_discrete_sequence=[ORANGE])
-            fig.update_layout(yaxis=dict(autorange="reversed"), xaxis_tickformat="$,.0f",
-                              height=500, showlegend=False)
+            fig.update_layout(
+                yaxis=dict(autorange="reversed"), xaxis_tickformat=METRIC_FMT,
+                height=480, showlegend=False,
+                yaxis_title="", margin=dict(t=10, b=10)
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     with col_dist:
         st.subheader("Parent Distributor Revenue")
         parent_df = get_parent_distributor_breakdown(conn, access_filter, selected_year, clients_tuple)
         if not parent_df.empty:
-            fig = px.bar(parent_df, x="DOLLARS", y="REFERENCE_PARENT_DISTRIBUTOR", orientation="h",
-                         color_discrete_sequence=["#4CAF50"])
-            fig.update_layout(yaxis=dict(autorange="reversed"), xaxis_tickformat="$,.0f",
-                              height=500, showlegend=False)
+            fig = px.bar(parent_df, x=METRIC_COL, y="REFERENCE_PARENT_DISTRIBUTOR", orientation="h",
+                         color_discrete_sequence=[GREEN])
+            fig.update_layout(
+                yaxis=dict(autorange="reversed"), xaxis_tickformat=METRIC_FMT,
+                height=480, showlegend=False,
+                yaxis_title="", margin=dict(t=10, b=10)
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
@@ -441,9 +508,9 @@ with tab4:
         st.subheader("Distributor Brand Split")
         brand_df = get_distributor_brand_split(conn, access_filter, selected_year, clients_tuple)
         if not brand_df.empty:
-            fig = px.pie(brand_df, values="DOLLARS", names="DISTRIBUTOR_BRAND",
+            fig = px.pie(brand_df, values=METRIC_COL, names="DISTRIBUTOR_BRAND",
                          color_discrete_sequence=px.colors.qualitative.Set3)
-            fig.update_layout(height=350)
+            fig.update_layout(height=340, margin=dict(t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
 
     with col_churn:
@@ -474,13 +541,11 @@ with tab5:
     years_for_share = tuple(sorted([y for y in available_years if y >= selected_year - 2]))
     share_df = get_client_market_share(conn, access_filter, years_for_share)
     if not share_df.empty:
-        # Calculate share %
         yearly_totals = share_df.groupby("DATA_YEAR")["DOLLARS"].sum().reset_index()
         yearly_totals.columns = ["DATA_YEAR", "YEAR_TOTAL"]
         share_df = share_df.merge(yearly_totals, on="DATA_YEAR")
         share_df["SHARE_PCT"] = (share_df["DOLLARS"] / share_df["YEAR_TOTAL"] * 100).round(2)
 
-        # Top 10 by most recent year
         latest_yr = share_df["DATA_YEAR"].max()
         top10 = share_df[share_df["DATA_YEAR"] == latest_yr].nlargest(10, "SHARE_PCT")["CLIENT_NAME"].tolist()
         share_display = share_df[share_df["CLIENT_NAME"].isin(top10)]
@@ -488,13 +553,13 @@ with tab5:
         fig = px.bar(share_display, x="DATA_YEAR", y="SHARE_PCT", color="CLIENT_NAME",
                      barmode="group", labels={"SHARE_PCT": "Market Share %", "DATA_YEAR": "Year"},
                      color_discrete_sequence=px.colors.qualitative.Set2)
-        fig.update_layout(height=450, xaxis=dict(dtick=1))
+        fig.update_layout(height=420, xaxis=dict(dtick=1), margin=dict(t=10, b=30))
         st.plotly_chart(fig, use_container_width=True)
 
     # Anomaly Detection
     st.markdown("---")
     st.subheader("Performance Anomalies")
-    st.caption("Months where a client deviated significantly from their own rolling average (Z-score > 2)")
+    st.caption(f"Months where a client's {metric_choice.lower()} deviated significantly from rolling average (Z-score > 2)")
 
     anomaly_clients = st.multiselect("Select clients for anomaly scan",
                                      options=all_clients,
@@ -507,22 +572,23 @@ with tab5:
                                               tuple(anomaly_clients))
         if not anom_trend.empty:
             anom_trend["PERIOD"] = pd.to_datetime(
-                anom_trend["DATA_YEAR"].astype(str) + "-" + anom_trend["DATA_MONTH"].astype(str).str.zfill(2) + "-01"
+                anom_trend["DATA_YEAR"].astype(str) + "-" +
+                anom_trend["DATA_MONTH"].astype(str).str.zfill(2) + "-01"
             )
             anomalies = []
             for client in anomaly_clients:
                 cdf = anom_trend[anom_trend["CLIENT_NAME"] == client].sort_values("PERIOD").copy()
                 if len(cdf) < 4:
                     continue
-                cdf["MA6"] = cdf["DOLLARS"].rolling(6, min_periods=3).mean()
-                cdf["STD6"] = cdf["DOLLARS"].rolling(6, min_periods=3).std()
-                cdf["Z_SCORE"] = (cdf["DOLLARS"] - cdf["MA6"]) / cdf["STD6"]
+                cdf["MA6"] = cdf[METRIC_COL].rolling(6, min_periods=3).mean()
+                cdf["STD6"] = cdf[METRIC_COL].rolling(6, min_periods=3).std()
+                cdf["Z_SCORE"] = (cdf[METRIC_COL] - cdf["MA6"]) / cdf["STD6"]
                 outliers = cdf[cdf["Z_SCORE"].abs() > 2]
                 for _, row in outliers.iterrows():
                     anomalies.append({
                         "CLIENT": client,
                         "PERIOD": row["PERIOD"].strftime("%b %Y"),
-                        "DOLLARS": row["DOLLARS"],
+                        metric_choice.upper(): row[METRIC_COL],
                         "EXPECTED": row["MA6"],
                         "Z_SCORE": round(row["Z_SCORE"], 2),
                         "TYPE": "Spike" if row["Z_SCORE"] > 0 else "Drop"
@@ -530,21 +596,145 @@ with tab5:
 
             if anomalies:
                 anom_df = pd.DataFrame(anomalies)
-                st.dataframe(anom_df, use_container_width=True, hide_index=True,
-                             column_config={
-                                 "DOLLARS": st.column_config.NumberColumn(format="$%.0f"),
-                                 "EXPECTED": st.column_config.NumberColumn(format="$%.0f"),
-                             })
+                st.dataframe(anom_df, use_container_width=True, hide_index=True)
             else:
                 st.success("No significant anomalies detected for the selected clients.")
 
     # Geographic view
     st.markdown("---")
-    st.subheader("Revenue by State")
+    st.subheader(f"{metric_choice} by State")
     state_df = get_state_breakdown(conn, access_filter, selected_year, clients_tuple)
     if not state_df.empty and len(state_df) > 1:
-        fig = px.bar(state_df.head(20), x="REFERENCE_STATE", y="DOLLARS",
+        fig = px.bar(state_df.head(20), x="REFERENCE_STATE", y=METRIC_COL,
                      color_discrete_sequence=[ORANGE],
-                     labels={"REFERENCE_STATE": "State", "DOLLARS": "Revenue"})
-        fig.update_layout(xaxis_tickangle=-45, yaxis_tickformat="$,.0f", height=350)
+                     labels={"REFERENCE_STATE": "State", METRIC_COL: metric_choice})
+        fig.update_layout(xaxis_tickangle=-45, yaxis_tickformat=METRIC_FMT,
+                          height=340, margin=dict(t=10, b=30))
         st.plotly_chart(fig, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════
+# TAB 6: ASK DATA (Cortex Analyst Chatbot)
+# ═══════════════════════════════════════════════
+with tab6:
+    st.subheader("Ask Questions About Your Data")
+    st.caption("Powered by Snowflake Cortex - uses the Consolidated Scorecard semantic view")
+
+    # Initialize chat history
+    if "scorecard_chat" not in st.session_state:
+        st.session_state.scorecard_chat = []
+
+    # Display chat history
+    for msg in st.session_state.scorecard_chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if "dataframe" in msg and msg["dataframe"] is not None:
+                st.dataframe(msg["dataframe"], use_container_width=True, hide_index=True)
+            if "sql" in msg and msg["sql"]:
+                with st.expander("View SQL"):
+                    st.code(msg["sql"], language="sql")
+
+    # Chat input
+    user_question = st.chat_input("Ask a question about scorecard data...")
+
+    if user_question:
+        # Add user message
+        st.session_state.scorecard_chat.append({"role": "user", "content": user_question})
+        with st.chat_message("user"):
+            st.markdown(user_question)
+
+        # Generate response
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing..."):
+                try:
+                    escaped_q = user_question.replace("'", "''")
+                    # Use Cortex Complete to generate SQL against the scorecard table
+                    analyst_sql = f"""
+                        SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                            'claude-4-sonnet',
+                            CONCAT(
+                                'You are a SQL expert for Snowflake. Generate a SQL query to answer this question: ',
+                                '{escaped_q}',
+                                '. Use table DB_PROD_CSM.SCH_CSM_SCORECARD.TB_SCORECARD_BI_EXPORT. ',
+                                'Key columns: CLIENT_NAME, REFERENCE_CUSTOMER_NAME, REFERENCE_PARENT_DISTRIBUTOR, ',
+                                'ITEM_NUMBER, ITEM_DESCRIPTION, ITEM_CATEGORY, DATA_YEAR, DATA_MONTH, ',
+                                'CASES (integer units sold), DOLLARS (revenue), LBS (weight shipped), ',
+                                'REFERENCE_REGION, REFERENCE_LOCAL_MARKET, REFERENCE_STATE, DISTRIBUTOR_BRAND, ',
+                                'SALES_REP, BRAND, SUB_CATEGORY. ',
+                                'DATA_YEAR is numeric (e.g. 2025, 2026). DATA_MONTH is numeric 1-12. ',
+                                'Return ONLY the SQL query with no explanation, no markdown code fences. ',
+                                'Always limit results to 50 rows unless counting/aggregating. ',
+                                'Round DOLLARS to 2 decimals. Format nicely with aliases.'
+                            )
+                        ) AS GENERATED_SQL
+                    """
+                    cur = conn.cursor()
+                    cur.execute(analyst_sql)
+                    result = cur.fetch_pandas_all()
+
+                    if result.empty:
+                        response_msg = "I couldn't generate a response. Try rephrasing your question."
+                        st.markdown(response_msg)
+                        st.session_state.scorecard_chat.append({
+                            "role": "assistant", "content": response_msg
+                        })
+                    else:
+                        generated_sql = result.iloc[0]["GENERATED_SQL"].strip()
+                        # Clean markdown code fences if present
+                        if generated_sql.startswith("```"):
+                            lines = generated_sql.split("\n")
+                            lines = [l for l in lines if not l.strip().startswith("```")]
+                            generated_sql = "\n".join(lines).strip()
+
+                        # Execute the generated SQL
+                        try:
+                            df_result = conn.cursor().execute(generated_sql).fetch_pandas_all()
+                            if df_result.empty:
+                                response_msg = "The query returned no results. Try adjusting your question."
+                                st.markdown(response_msg)
+                                st.session_state.scorecard_chat.append({
+                                    "role": "assistant", "content": response_msg,
+                                    "sql": generated_sql
+                                })
+                            else:
+                                response_msg = f"Found **{len(df_result)} rows**:"
+                                st.markdown(response_msg)
+                                st.dataframe(df_result, use_container_width=True, hide_index=True)
+                                with st.expander("View SQL"):
+                                    st.code(generated_sql, language="sql")
+
+                                st.session_state.scorecard_chat.append({
+                                    "role": "assistant", "content": response_msg,
+                                    "dataframe": df_result,
+                                    "sql": generated_sql
+                                })
+                        except Exception as sql_err:
+                            err_msg = f"Query execution error: {str(sql_err)[:200]}\n\nTry rephrasing your question."
+                            st.error(err_msg)
+                            with st.expander("View attempted SQL"):
+                                st.code(generated_sql, language="sql")
+                            st.session_state.scorecard_chat.append({
+                                "role": "assistant", "content": err_msg,
+                                "sql": generated_sql
+                            })
+
+                except Exception as e:
+                    error_msg = f"Error: {str(e)[:300]}"
+                    st.error(error_msg)
+                    st.session_state.scorecard_chat.append({
+                        "role": "assistant", "content": error_msg
+                    })
+
+    # Example questions
+    if not st.session_state.scorecard_chat:
+        st.markdown("**Example questions you can ask:**")
+        examples = [
+            "What are the top 10 clients by cases this year?",
+            "Show monthly cases trend for 2026 vs 2025",
+            "Which categories grew the most year over year?",
+            "What customers buy from the most clients?",
+            "Show me declining items by cases in the Southwest region",
+            "What is the total dollars and cases by region for 2026?"
+        ]
+        for ex in examples:
+            st.markdown(f"- _{ex}_")
