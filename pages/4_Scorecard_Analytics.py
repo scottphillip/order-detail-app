@@ -519,7 +519,7 @@ with tab4:
         st.subheader(f"Top 20 Customers ({selected_year})")
         cust_df = get_top_customers(conn, access_filter, selected_year, clients_tuple)
         if not cust_df.empty:
-            fig = px.bar(cust_df, x=METRIC_COL, y="CUSTOMER_DISPLAY_NAME", orientation="h",
+            fig = px.bar(cust_df, x=METRIC_COL, y="REFERENCE_NAME_IN_SYSTEM", orientation="h",
                          color_discrete_sequence=[ORANGE])
             fig.update_layout(
                 yaxis=dict(autorange="reversed"), xaxis_tickformat=METRIC_FMT,
@@ -852,5 +852,29 @@ with tab6:
 # ═══════════════════════════════════════════════
 # FLOATING CHATBOT WIDGET (bottom-right corner)
 # ═══════════════════════════════════════════════
-from utils.chatbot_widget import render_floating_chatbot
-render_floating_chatbot(conn)
+st.markdown("""
+<style>
+#chatbot-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999999;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #F5921E;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+    text-decoration: none;
+}
+#chatbot-fab:hover { transform: scale(1.1); }
+</style>
+<a id="chatbot-fab" href="#ask-data-tab" title="Ask a question">💬</a>
+""", unsafe_allow_html=True)
