@@ -618,11 +618,80 @@ with tab5:
 # ═══════════════════════════════════════════════
 with tab6:
     st.subheader("Ask Questions About Your Data")
-    st.caption("Powered by Snowflake Cortex - uses the Consolidated Scorecard semantic view")
+    st.caption("Powered by Snowflake Cortex | Type or click 🎤 to speak (Chrome/Edge)")
 
     # Initialize chat history
     if "scorecard_chat" not in st.session_state:
         st.session_state.scorecard_chat = []
+
+    # Voice input section
+    import streamlit.components.v1 as components
+
+    voice_col, info_col = st.columns([1, 5])
+    with voice_col:
+        voice_clicked = st.button("🎤 Speak", key="voice_btn", use_container_width=True)
+    with info_col:
+        if voice_clicked or st.session_state.get("voice_active", False):
+            st.session_state["voice_active"] = True
+            st.markdown(
+                '<span style="color:#e53e3e; font-size:13px;">● Listening... speak your question</span>',
+                unsafe_allow_html=True)
+
+    # Voice recognition component (renders when voice is active)
+    voice_question = None
+    if st.session_state.get("voice_active", False):
+        components.html("""
+        <div id="voice-status" style="font-family:sans-serif; font-size:13px; color:#666; padding:4px 0;">
+            <span id="vtext">Initializing...</span>
+        </div>
+        <script>
+        (function() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+                document.getElementById('vtext').textContent = 'Not supported - use Chrome or Edge';
+                return;
+            }
+            const rec = new SR();
+            rec.continuous = false;
+            rec.interimResults = true;
+            rec.lang = 'en-US';
+            rec.onstart = function() {
+                document.getElementById('vtext').textContent = 'Listening...';
+            };
+            rec.onresult = function(event) {
+                let t = '';
+                let done = false;
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    t += event.results[i][0].transcript;
+                    if (event.results[i].isFinal) done = true;
+                }
+                document.getElementById('vtext').textContent = t;
+                if (done) {
+                    document.getElementById('vtext').innerHTML =
+                        '<span style="color:#4CAF50">&#10003;</span> ' + t;
+                    const url = new URL(window.parent.location);
+                    url.searchParams.set('voice_q', encodeURIComponent(t));
+                    window.parent.history.replaceState({}, '', url);
+                    setTimeout(function() { window.parent.location.reload(); }, 600);
+                }
+            };
+            rec.onerror = function(e) {
+                document.getElementById('vtext').textContent = 'Error: ' + e.error;
+            };
+            rec.start();
+        })();
+        </script>
+        """, height=30)
+
+        # Check for voice transcript in query params
+        query_params = st.query_params
+        if "voice_q" in query_params:
+            voice_question = query_params["voice_q"]
+            # URL-decode if needed
+            from urllib.parse import unquote
+            voice_question = unquote(voice_question)
+            st.session_state["voice_active"] = False
+            del st.query_params["voice_q"]
 
     # Display chat history
     for msg in st.session_state.scorecard_chat:
@@ -634,8 +703,9 @@ with tab6:
                 with st.expander("View SQL"):
                     st.code(msg["sql"], language="sql")
 
-    # Chat input
-    user_question = st.chat_input("Ask a question about scorecard data...")
+    # Chat input (keyboard or voice)
+    typed_question = st.chat_input("Ask a question about scorecard data...")
+    user_question = voice_question or typed_question
 
     if user_question:
         # Add user message
