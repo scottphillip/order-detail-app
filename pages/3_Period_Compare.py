@@ -200,12 +200,72 @@ st.markdown("---")
 # Monthly trend overlay
 st.markdown("### Monthly Sales Overlay")
 
+# Get monthly data for both periods
 monthly_a = get_monthly_breakdown(conn, territory_filter,
                                   manufacturer_filter=manufacturer_filter or None,
                                   year=year_a, month_start=month_start_a, month_end=month_end_a)
 monthly_b = get_monthly_breakdown(conn, territory_filter,
                                   manufacturer_filter=manufacturer_filter or None,
                                   year=year_b, month_start=month_start_b, month_end=month_end_b)
+
+# ─── Partial Month Fix ───
+# For the current month of the current year, PY data should be capped to the same
+# day-of-month as the latest CY data so comparisons are apples-to-apples.
+current_year_now = datetime.now().year
+current_month_now = datetime.now().month
+
+if (not monthly_a.empty and not monthly_b.empty
+        and year_a == current_year_now):
+    # Find the max date in the CY data for the latest month
+    max_date_query = f"""
+        SELECT MAX({PARSE_DATE}) AS MAX_DT
+        FROM {ORDER_VIEW}
+        WHERE {_build_where(territory_filter, manufacturer_filter=manufacturer_filter or None, year_filter=year_a)}
+    """
+    try:
+        max_dt_df = conn.cursor().execute(max_date_query).fetch_pandas_all()
+        if not max_dt_df.empty and max_dt_df.iloc[0]["MAX_DT"] is not None:
+            max_date = pd.to_datetime(max_dt_df.iloc[0]["MAX_DT"])
+            max_day = max_date.day
+            max_month = max_date.month
+
+            # If the latest CY month is partial (not month-end), re-query that month for PY
+            # using only days <= max_day to make it apples-to-apples
+            import calendar
+            _, last_day_of_month = calendar.monthrange(max_date.year, max_month)
+
+            if max_day < last_day_of_month:
+                # Re-query PY for just that partial month with day cap
+                partial_where_b = _build_where(
+                    territory_filter, manufacturer_filter=manufacturer_filter or None,
+                    year_filter=year_b, month_start=max_month, month_end=max_month)
+                partial_query = f"""
+                    SELECT
+                        DATE_TRUNC('MONTH', {PARSE_DATE}) AS "Month",
+                        MONTHNAME({PARSE_DATE}) AS "Month Name",
+                        SUM(TRY_TO_DOUBLE(DOLLARS)) AS "Total Dollars",
+                        SUM(TRY_TO_DOUBLE(QTY)) AS "Total Qty",
+                        SUM(TRY_TO_DOUBLE(COMM)) AS "Total Comm",
+                        COUNT(DISTINCT ORDERNUMBER) AS "Orders"
+                    FROM {ORDER_VIEW}
+                    WHERE {partial_where_b}
+                      AND {PARSE_DATE} IS NOT NULL
+                      AND DAY({PARSE_DATE}) <= {max_day}
+                    GROUP BY "Month", "Month Name"
+                    ORDER BY "Month"
+                """
+                partial_b_df = conn.cursor().execute(partial_query).fetch_pandas_all()
+
+                # Replace the full-month PY row with the partial one
+                if not partial_b_df.empty:
+                    month_name = max_date.strftime("%b")
+                    monthly_b = monthly_b[monthly_b["Month Name"] != month_name]
+                    monthly_b = pd.concat([monthly_b, partial_b_df], ignore_index=True)
+
+                # Add a note about the partial month
+                st.caption(f"Note: {max_date.strftime('%B')} is partial — comparing through day {max_day} for both years.")
+    except Exception:
+        pass  # If anything fails, just use the full month comparison
 
 if not monthly_a.empty or not monthly_b.empty:
     if not monthly_a.empty:
