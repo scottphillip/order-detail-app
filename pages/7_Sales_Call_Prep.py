@@ -4,10 +4,33 @@ Pick a customer or manufacturer → instant summary: YTD sales, trend,
 top items, last order, how they compare to last year, commission earned.
 Designed to be checked in 2 minutes before walking into a meeting.
 """
+import math
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 from datetime import datetime
+
+
+def _safe_int(v):
+    """Convert value to int, handling None, NaN, and other non-numeric values."""
+    if v is None:
+        return 0
+    try:
+        f = float(v)
+        return 0 if math.isnan(f) else int(f)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(v):
+    """Convert value to float, handling None, NaN, and other non-numeric values."""
+    if v is None:
+        return 0.0
+    try:
+        f = float(v)
+        return 0.0 if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return 0.0
 
 from utils.auth import get_access_filter, get_access_display
 from utils.connection import get_nxt_connection
@@ -170,14 +193,14 @@ def get_prep_data(_conn, entity_type: str, entity_name: str, territory_filter: s
     py = py_df.iloc[0] if not py_df.empty else {}
 
     return {
-        "ytd_dollars": float(ytd.get("DOLLARS") or 0),
-        "ytd_cases": int(ytd.get("CASES") or 0),
-        "ytd_commission": float(ytd.get("COMMISSION") or 0),
-        "ytd_orders": int(ytd.get("ORDERS") or 0),
+        "ytd_dollars": _safe_float(ytd.get("DOLLARS")),
+        "ytd_cases": _safe_int(ytd.get("CASES")),
+        "ytd_commission": _safe_float(ytd.get("COMMISSION")),
+        "ytd_orders": _safe_int(ytd.get("ORDERS")),
         "last_order": ytd.get("LAST_ORDER_DATE"),
-        "py_dollars": float(py.get("DOLLARS") or 0),
-        "py_cases": int(py.get("CASES") or 0),
-        "py_commission": float(py.get("COMMISSION") or 0),
+        "py_dollars": _safe_float(py.get("DOLLARS")),
+        "py_cases": _safe_int(py.get("CASES")),
+        "py_commission": _safe_float(py.get("COMMISSION")),
         "top_items": items_df,
         "trend": trend_df,
         "breakdown": breakdown_df,
