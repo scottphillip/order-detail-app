@@ -388,11 +388,12 @@ def run_custom_query(conn, sql: str) -> pd.DataFrame:
 def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = -20.0,
                            min_cases: int = 10000) -> pd.DataFrame:
     """
-    Find accounts with significant YoY case decline in the current period.
-    Compares current year-to-date vs same period last year.
-    Uses UPPER(TRIM(DISTRIBUTORNAME)) to consolidate case-variant duplicates
-    (e.g. "C&S Wholesale Grocers" vs "C&S WHOLESALE GROCERS").
-    Only includes accounts with at least min_cases last year (avoids noise).
+    Find accounts with significant YoY case decline using only complete months.
+    Excludes the most recent 2 months (data always lags) and compares the same
+    complete months CY vs PY. E.g. if current month is June, compares Jan-Apr CY
+    vs Jan-Apr PY.
+    Uses UPPER(TRIM(DISTRIBUTORNAME)) to consolidate case-variant duplicates.
+    Only includes accounts with at least min_cases in PY period (avoids noise).
 
     Returns DataFrame with columns: DISTRIBUTOR, CY_CASES, PY_CASES, PCT_CHANGE, CASE_DELTA
     """
@@ -404,7 +405,7 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
             FROM {ORDER_VIEW}
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())
-              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
+              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE()) - 2
               AND TRY_TO_DOUBLE(QTY) > 0
               AND UPPER(OFFICENAME) NOT LIKE '%RETAIL%'
             GROUP BY UPPER(TRIM(DISTRIBUTORNAME))
@@ -416,7 +417,7 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
             FROM {ORDER_VIEW}
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE()) - 1
-              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
+              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE()) - 2
               AND TRY_TO_DOUBLE(QTY) > 0
               AND UPPER(OFFICENAME) NOT LIKE '%RETAIL%'
             GROUP BY UPPER(TRIM(DISTRIBUTORNAME))

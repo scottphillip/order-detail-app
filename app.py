@@ -150,7 +150,7 @@ declining_df = get_declining_accounts(conn, territory_filter)
 if not declining_df.empty:
     st.markdown("---")
     st.markdown("### Accounts Needing Attention")
-    st.caption("Customers with >20% YoY case decline (year-to-date vs same period last year, min 10K cases PY)")
+    st.caption("Customers with >20% YoY case decline (complete months only, excludes latest 2 months)")
     for _, row in declining_df.head(5).iterrows():
         pct = row["PCT_CHANGE"]
         cy = row["CY_CASES"]
