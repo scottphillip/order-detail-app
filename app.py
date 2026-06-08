@@ -149,19 +149,19 @@ kpi4.metric("Commission", f"${kpis['comm']:,.0f}")
 declining_df = get_declining_accounts(conn, territory_filter)
 if not declining_df.empty:
     st.markdown("---")
-    st.markdown("### ⚠ Accounts Needing Attention")
-    st.caption("Customers with >20% YoY decline (year-to-date vs same period last year)")
+    st.markdown("### Accounts Needing Attention")
+    st.caption("Customers with >20% YoY case decline (year-to-date vs same period last year)")
     for _, row in declining_df.head(5).iterrows():
         pct = row["PCT_CHANGE"]
-        cy = row["CY_DOLLARS"]
-        py = row["PY_DOLLARS"]
+        cy = row["CY_CASES"]
+        py = row["PY_CASES"]
         name = row["DISTRIBUTORNAME"]
         st.markdown(
             f'<div style="background:#FFF3E0; border-left:4px solid #E65100; '
             f'padding:10px 15px; margin:5px 0; border-radius:4px;">'
             f'<strong>{name}</strong> — '
             f'<span style="color:#E65100;">{pct:+.1f}%</span> '
-            f'<span style="color:#666;">(${cy:,.0f} vs ${py:,.0f} last year)</span>'
+            f'<span style="color:#666;">({cy:,.0f} cases vs {py:,.0f} last year)</span>'
             f'</div>',
             unsafe_allow_html=True
         )
