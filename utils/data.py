@@ -384,44 +384,47 @@ def run_custom_query(conn, sql: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = -20.0,
-                           min_cases: int = 500) -> pd.DataFrame:
+                           min_cases: int = 10000) -> pd.DataFrame:
     """
     Find accounts with significant YoY case decline in the current period.
     Compares current year-to-date vs same period last year.
+    Uses UPPER(TRIM(DISTRIBUTORNAME)) to consolidate case-variant duplicates
+    (e.g. "C&S Wholesale Grocers" vs "C&S WHOLESALE GROCERS").
     Only includes accounts with at least min_cases last year (avoids noise).
 
-    Returns DataFrame with columns: DISTRIBUTORNAME, CY_CASES, PY_CASES, PCT_CHANGE
+    Returns DataFrame with columns: DISTRIBUTOR, CY_CASES, PY_CASES, PCT_CHANGE, CASE_DELTA
     """
     query = f"""
         WITH current_year AS (
             SELECT
-                DISTRIBUTORNAME,
+                UPPER(TRIM(DISTRIBUTORNAME)) AS DISTRIBUTOR,
                 SUM(TRY_TO_DOUBLE(QTY)) AS CY_CASES
             FROM {ORDER_VIEW}
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
               AND TRY_TO_DOUBLE(QTY) > 0
-            GROUP BY DISTRIBUTORNAME
+            GROUP BY UPPER(TRIM(DISTRIBUTORNAME))
         ),
         prior_year AS (
             SELECT
-                DISTRIBUTORNAME,
+                UPPER(TRIM(DISTRIBUTORNAME)) AS DISTRIBUTOR,
                 SUM(TRY_TO_DOUBLE(QTY)) AS PY_CASES
             FROM {ORDER_VIEW}
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE()) - 1
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
               AND TRY_TO_DOUBLE(QTY) > 0
-            GROUP BY DISTRIBUTORNAME
+            GROUP BY UPPER(TRIM(DISTRIBUTORNAME))
         )
         SELECT
-            py.DISTRIBUTORNAME,
+            py.DISTRIBUTOR,
             COALESCE(cy.CY_CASES, 0) AS CY_CASES,
             py.PY_CASES,
-            ROUND(((COALESCE(cy.CY_CASES, 0) - py.PY_CASES) / py.PY_CASES) * 100, 1) AS PCT_CHANGE
+            ROUND(((COALESCE(cy.CY_CASES, 0) - py.PY_CASES) / py.PY_CASES) * 100, 1) AS PCT_CHANGE,
+            COALESCE(cy.CY_CASES, 0) - py.PY_CASES AS CASE_DELTA
         FROM prior_year py
-        LEFT JOIN current_year cy ON cy.DISTRIBUTORNAME = py.DISTRIBUTORNAME
+        LEFT JOIN current_year cy ON cy.DISTRIBUTOR = py.DISTRIBUTOR
         WHERE py.PY_CASES >= {min_cases}
           AND ((COALESCE(cy.CY_CASES, 0) - py.PY_CASES) / py.PY_CASES) * 100 <= {threshold_pct}
         ORDER BY (COALESCE(cy.CY_CASES, 0) - py.PY_CASES) ASC

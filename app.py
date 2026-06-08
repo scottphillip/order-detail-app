@@ -150,18 +150,23 @@ declining_df = get_declining_accounts(conn, territory_filter)
 if not declining_df.empty:
     st.markdown("---")
     st.markdown("### Accounts Needing Attention")
-    st.caption("Customers with >20% YoY case decline (year-to-date vs same period last year)")
+    st.caption("Customers with >20% YoY case decline (year-to-date vs same period last year, min 10K cases PY)")
     for _, row in declining_df.head(5).iterrows():
         pct = row["PCT_CHANGE"]
         cy = row["CY_CASES"]
         py = row["PY_CASES"]
-        name = row["DISTRIBUTORNAME"]
+        delta = row["CASE_DELTA"]
+        name = row["DISTRIBUTOR"].title()  # Convert UPPER back to title case for display
+        # Flag potential entity renames (>95% decline is almost certainly a rename, not lost business)
+        rename_note = ""
+        if pct <= -95:
+            rename_note = ' <span style="color:#1565C0; font-size:0.85em;">(possible entity rename)</span>'
         st.markdown(
             f'<div style="background:#FFF3E0; border-left:4px solid #E65100; '
             f'padding:10px 15px; margin:5px 0; border-radius:4px;">'
             f'<strong>{name}</strong> — '
-            f'<span style="color:#E65100;">{pct:+.1f}%</span> '
-            f'<span style="color:#666;">({cy:,.0f} cases vs {py:,.0f} last year)</span>'
+            f'<span style="color:#E65100;">{pct:+.1f}%</span>{rename_note} '
+            f'<span style="color:#666;">({cy:,.0f} cases vs {py:,.0f} last year, {delta:,.0f} case change)</span>'
             f'</div>',
             unsafe_allow_html=True
         )
