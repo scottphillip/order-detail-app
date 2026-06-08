@@ -33,6 +33,8 @@ def _build_where(territory_filter: str, manufacturer_filter: list = None,
     month_start/month_end filter by MONTH(date) BETWEEN start AND end.
     Includes data quality filter to exclude corrupt dollar values."""
     clauses = [territory_filter]
+    # Exclude retail offices — this app is for foodservice sales only
+    clauses.append("UPPER(OFFICENAME) NOT LIKE '%RETAIL%'")
     # Data quality: exclude rows with unreasonably large dollar values (column misalignment)
     clauses.append(f"(TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})")
     if year_filter:
@@ -404,6 +406,7 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
               AND TRY_TO_DOUBLE(QTY) > 0
+              AND UPPER(OFFICENAME) NOT LIKE '%RETAIL%'
             GROUP BY UPPER(TRIM(DISTRIBUTORNAME))
         ),
         prior_year AS (
@@ -415,6 +418,7 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE()) - 1
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
               AND TRY_TO_DOUBLE(QTY) > 0
+              AND UPPER(OFFICENAME) NOT LIKE '%RETAIL%'
             GROUP BY UPPER(TRIM(DISTRIBUTORNAME))
         )
         SELECT
