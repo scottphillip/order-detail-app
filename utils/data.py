@@ -384,11 +384,12 @@ def run_custom_query(conn, sql: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = -20.0,
-                           min_dollars: float = 5000) -> pd.DataFrame:
+                           min_dollars: float = 50000) -> pd.DataFrame:
     """
     Find accounts with significant YoY decline in the current period.
     Compares current year-to-date vs same period last year.
-    Only includes accounts with at least $min_dollars last year (avoids noise).
+    Only includes accounts with at least $min_dollars last year (avoids noise from small accounts).
+    Excludes accounts with net-negative current year (those are credits/returns, not real declines).
 
     Returns DataFrame with columns: DISTRIBUTORNAME, CY_DOLLARS, PY_DOLLARS, PCT_CHANGE
     """
@@ -401,7 +402,8 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
-              AND (TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})
+              AND TRY_TO_DOUBLE(DOLLARS) > 0
+              AND TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS}
             GROUP BY DISTRIBUTORNAME
         ),
         prior_year AS (
@@ -412,19 +414,21 @@ def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = 
             WHERE {territory_filter}
               AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE()) - 1
               AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
-              AND (TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})
+              AND TRY_TO_DOUBLE(DOLLARS) > 0
+              AND TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS}
             GROUP BY DISTRIBUTORNAME
         )
         SELECT
-            COALESCE(cy.DISTRIBUTORNAME, py.DISTRIBUTORNAME) AS DISTRIBUTORNAME,
+            py.DISTRIBUTORNAME,
             COALESCE(cy.CY_DOLLARS, 0) AS CY_DOLLARS,
             py.PY_DOLLARS,
-            ROUND(((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / NULLIF(py.PY_DOLLARS, 0)) * 100, 1) AS PCT_CHANGE
+            ROUND(((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / py.PY_DOLLARS) * 100, 1) AS PCT_CHANGE
         FROM prior_year py
         LEFT JOIN current_year cy ON cy.DISTRIBUTORNAME = py.DISTRIBUTORNAME
         WHERE py.PY_DOLLARS >= {min_dollars}
-          AND ((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / NULLIF(py.PY_DOLLARS, 0)) * 100 <= {threshold_pct}
-        ORDER BY PCT_CHANGE ASC
+          AND COALESCE(cy.CY_DOLLARS, 0) >= 0
+          AND ((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / py.PY_DOLLARS) * 100 <= {threshold_pct}
+        ORDER BY (COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) ASC
         LIMIT 10
     """
     try:
