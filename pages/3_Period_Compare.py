@@ -9,10 +9,12 @@ import pandas as pd
 from datetime import datetime
 
 from utils.auth import get_access_filter, get_access_display
+from utils.connection import get_nxt_connection
 from utils.data import (
     get_kpis, get_monthly_breakdown, get_filter_options,
     get_available_years, get_max_month, ORDER_VIEW, PARSE_DATE, _build_where,
 )
+from utils.export import excel_download_button
 
 st.set_page_config(page_title="Period Compare | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
@@ -23,29 +25,8 @@ if "user" not in st.session_state:
 
 
 def get_snowflake_connection():
-    import snowflake.connector
-    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
-        st.session_state.sf_conn = snowflake.connector.connect(
-            account=st.secrets["snowflake"]["account"],
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            role=st.secrets["snowflake"]["role"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database="DB_NXT",
-        )
-    else:
-        try:
-            st.session_state.sf_conn.cursor().execute("SELECT 1")
-        except Exception:
-            st.session_state.sf_conn = snowflake.connector.connect(
-                account=st.secrets["snowflake"]["account"],
-                user=st.secrets["snowflake"]["user"],
-                password=st.secrets["snowflake"]["password"],
-                role=st.secrets["snowflake"]["role"],
-                warehouse=st.secrets["snowflake"]["warehouse"],
-                database="DB_NXT",
-            )
-    return st.session_state.sf_conn
+    """Get Snowflake connection (delegates to centralized module)."""
+    return get_nxt_connection()
 
 
 # Period type mappings
@@ -247,6 +228,7 @@ if not monthly_a.empty or not monthly_b.empty:
                 monthly_b[["Month Name", "Total Dollars", "Total Qty"]],
                 on="Month Name", how="outer", suffixes=(f" ({label_a})", f" ({label_b})"))
             st.dataframe(merge_df, use_container_width=True, hide_index=True)
+            excel_download_button(merge_df, "period_compare", "Export Period Comparison")
 else:
     st.info("No data available for the selected periods.")
 

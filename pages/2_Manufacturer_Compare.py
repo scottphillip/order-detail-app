@@ -7,10 +7,12 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 from utils.auth import get_access_filter, get_access_display
+from utils.connection import get_nxt_connection
 from utils.data import (
     get_kpis, get_monthly_breakdown, get_filter_options,
     get_available_years, get_distributor_parents, ORDER_VIEW, PARSE_DATE, _build_where,
 )
+from utils.export import excel_download_button
 
 st.set_page_config(page_title="Manufacturer Compare | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
@@ -21,29 +23,8 @@ if "user" not in st.session_state:
 
 
 def get_snowflake_connection():
-    import snowflake.connector
-    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
-        st.session_state.sf_conn = snowflake.connector.connect(
-            account=st.secrets["snowflake"]["account"],
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            role=st.secrets["snowflake"]["role"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database="DB_NXT",
-        )
-    else:
-        try:
-            st.session_state.sf_conn.cursor().execute("SELECT 1")
-        except Exception:
-            st.session_state.sf_conn = snowflake.connector.connect(
-                account=st.secrets["snowflake"]["account"],
-                user=st.secrets["snowflake"]["user"],
-                password=st.secrets["snowflake"]["password"],
-                role=st.secrets["snowflake"]["role"],
-                warehouse=st.secrets["snowflake"]["warehouse"],
-                database="DB_NXT",
-            )
-    return st.session_state.sf_conn
+    """Get Snowflake connection (delegates to centralized module)."""
+    return get_nxt_connection()
 
 
 conn = get_snowflake_connection()
@@ -126,6 +107,7 @@ if all_monthly:
                  barmode="group", text_auto="$.2s")
     fig.update_layout(height=400, xaxis_title="", yaxis_title="Sales ($)")
     st.plotly_chart(fig, use_container_width=True)
+    excel_download_button(combined, "manufacturer_compare", "Export Comparison Data")
 
 st.markdown("---")
 

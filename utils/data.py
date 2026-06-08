@@ -4,6 +4,7 @@ All queries use VW_MYORDERDETAIL_ALL which has PARENT_DISTRIBUTOR pre-joined.
 Includes monthly breakdown, manufacturer drill-down, and distributor hierarchy.
 """
 import pandas as pd
+import streamlit as st
 
 # Main order view — has PARENT_DISTRIBUTOR already joined
 ORDER_VIEW = "DB_NXT.SCH_NXT.VW_MYORDERDETAIL_ALL"
@@ -66,7 +67,8 @@ def _add_store_filter(where: str, store_name: str = None) -> str:
     return where
 
 
-def get_available_years(conn, territory_filter: str) -> list:
+@st.cache_data(ttl=600, show_spinner=False)
+def get_available_years(_conn, territory_filter: str) -> list:
     """Get distinct years available in the order data."""
     query = f"""
         SELECT DISTINCT YEAR({PARSE_DATE}) AS yr
@@ -75,13 +77,14 @@ def get_available_years(conn, territory_filter: str) -> list:
           AND {PARSE_DATE} IS NOT NULL
         ORDER BY yr DESC
     """
-    df = conn.cursor().execute(query).fetch_pandas_all()
+    df = _conn.cursor().execute(query).fetch_pandas_all()
     if df.empty:
         return []
     return [int(y) for y in df["YR"].dropna().tolist()]
 
 
-def get_max_month(conn, territory_filter: str, year: int) -> int:
+@st.cache_data(ttl=600, show_spinner=False)
+def get_max_month(_conn, territory_filter: str, year: int) -> int:
     """Get the latest month with data for a given year."""
     query = f"""
         SELECT MAX(MONTH({PARSE_DATE})) AS max_mo
@@ -90,7 +93,7 @@ def get_max_month(conn, territory_filter: str, year: int) -> int:
           AND YEAR({PARSE_DATE}) = {year}
           AND {PARSE_DATE} IS NOT NULL
     """
-    df = conn.cursor().execute(query).fetch_pandas_all()
+    df = _conn.cursor().execute(query).fetch_pandas_all()
     if df.empty or df.iloc[0]["MAX_MO"] is None:
         return 12
     import math
@@ -102,7 +105,8 @@ def get_max_month(conn, territory_filter: str, year: int) -> int:
         return 12
 
 
-def get_categories_for_manufacturers(conn, territory_filter: str,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_categories_for_manufacturers(_conn, territory_filter: str,
                                      manufacturer_filter: list) -> list:
     """Get item categories available for selected manufacturers (current year)."""
     where = _build_where(territory_filter, manufacturer_filter)
@@ -112,11 +116,12 @@ def get_categories_for_manufacturers(conn, territory_filter: str,
         WHERE {where} AND CATEGORY IS NOT NULL AND CATEGORY != ''
         ORDER BY CATEGORY
     """
-    df = conn.cursor().execute(query).fetch_pandas_all()
+    df = _conn.cursor().execute(query).fetch_pandas_all()
     return df["CATEGORY"].tolist() if not df.empty else []
 
 
-def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_kpis(_conn, territory_filter: str, manufacturer_filter: list = None,
              parent_filter: str = None, category_filter: list = None,
              year: int = None, store_name: str = None,
              month_start: int = None, month_end: int = None) -> dict:
@@ -136,7 +141,7 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
         FROM {ORDER_VIEW}
         WHERE {where}
     """
-    df = conn.cursor().execute(query).fetch_pandas_all()
+    df = _conn.cursor().execute(query).fetch_pandas_all()
     if df.empty:
         return {"dollars": 0, "orders": 0, "qty": 0, "comm": 0, "avg_order": 0}
     row = df.iloc[0]
@@ -165,7 +170,8 @@ def get_kpis(conn, territory_filter: str, manufacturer_filter: list = None,
     }
 
 
-def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_monthly_breakdown(_conn, territory_filter: str, manufacturer_filter: list = None,
                           parent_filter: str = None, category_filter: list = None,
                           year: int = None, store_name: str = None,
                           month_start: int = None, month_end: int = None) -> pd.DataFrame:
@@ -187,10 +193,11 @@ def get_monthly_breakdown(conn, territory_filter: str, manufacturer_filter: list
         GROUP BY "Month", "Month Name"
         ORDER BY "Month"
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_top_manufacturers(conn, territory_filter: str, parent_filter: str = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_top_manufacturers(_conn, territory_filter: str, parent_filter: str = None,
                           category_filter: list = None, year: int = None,
                           limit: int = 10) -> pd.DataFrame:
     """Get top manufacturers by dollars (selected year)."""
@@ -209,10 +216,11 @@ def get_top_manufacturers(conn, territory_filter: str, parent_filter: str = None
         ORDER BY "Total Dollars" DESC
         LIMIT {limit}
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_sales_trend(_conn, territory_filter: str, manufacturer_filter: list = None,
                     parent_filter: str = None, category_filter: list = None,
                     year: int = None) -> pd.DataFrame:
     """Get weekly sales trend (selected year)."""
@@ -228,14 +236,15 @@ def get_sales_trend(conn, territory_filter: str, manufacturer_filter: list = Non
         GROUP BY "Week"
         ORDER BY "Week"
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
 # =============================================================================
 # DISTRIBUTOR HIERARCHY (uses PARENT_DISTRIBUTOR column directly)
 # =============================================================================
 
-def get_distributor_parents(conn, territory_filter: str, manufacturer_filter: list = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_distributor_parents(_conn, territory_filter: str, manufacturer_filter: list = None,
                             year: int = None) -> pd.DataFrame:
     """Get distributor parents with rollup totals using PARENT_DISTRIBUTOR column."""
     where = _build_where(territory_filter, manufacturer_filter, year_filter=year)
@@ -250,10 +259,11 @@ def get_distributor_parents(conn, territory_filter: str, manufacturer_filter: li
         GROUP BY "Parent"
         ORDER BY "Total Dollars" DESC
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_parent_stores(conn, territory_filter: str, parent_name: str,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_parent_stores(_conn, territory_filter: str, parent_name: str,
                       manufacturer_filter: list = None, year: int = None) -> pd.DataFrame:
     """Get individual store breakdown under a parent distributor."""
     where = _build_where(territory_filter, manufacturer_filter, parent_filter=parent_name, year_filter=year)
@@ -269,10 +279,11 @@ def get_parent_stores(conn, territory_filter: str, parent_name: str,
         GROUP BY "Store"
         ORDER BY "Total Dollars" DESC
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_parent_monthly(conn, territory_filter: str, parent_name: str,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_parent_monthly(_conn, territory_filter: str, parent_name: str,
                        manufacturer_filter: list = None, year: int = None) -> pd.DataFrame:
     """Monthly breakdown for a parent distributor's stores."""
     where = _build_where(territory_filter, manufacturer_filter, parent_filter=parent_name, year_filter=year)
@@ -288,10 +299,11 @@ def get_parent_monthly(conn, territory_filter: str, parent_name: str,
         GROUP BY "Month", "Month Name"
         ORDER BY "Month"
     """
-    return conn.cursor().execute(query).fetch_pandas_all()
+    return _conn.cursor().execute(query).fetch_pandas_all()
 
 
-def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = None,
+@st.cache_data(ttl=600, show_spinner=False)
+def get_pfg_summary(_conn, territory_filter: str, manufacturer_filter: list = None,
                     year: int = None) -> dict:
     """
     Get PFG (Performance Food Group) super-parent summary.
@@ -311,7 +323,7 @@ def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = Non
         GROUP BY PARENT_DISTRIBUTOR
         ORDER BY "Total Dollars" DESC
     """
-    df = conn.cursor().execute(query).fetch_pandas_all()
+    df = _conn.cursor().execute(query).fetch_pandas_all()
     total_dollars = df["Total Dollars"].sum() if not df.empty else 0
     total_stores = df["Store Count"].sum() if not df.empty else 0
     return {
@@ -325,7 +337,8 @@ def get_pfg_summary(conn, territory_filter: str, manufacturer_filter: list = Non
 # FILTER OPTIONS
 # =============================================================================
 
-def get_filter_options(conn, territory_filter: str, year: int = None) -> dict:
+@st.cache_data(ttl=600, show_spinner=False)
+def get_filter_options(_conn, territory_filter: str, year: int = None) -> dict:
     """Get available filter values scoped to user's access."""
     where = _build_where(territory_filter, year_filter=year)
 
@@ -335,7 +348,7 @@ def get_filter_options(conn, territory_filter: str, year: int = None) -> dict:
         WHERE {where} AND MANUFACTURERNAME IS NOT NULL
         ORDER BY MANUFACTURERNAME
     """
-    mfr_df = conn.cursor().execute(mfr_query).fetch_pandas_all()
+    mfr_df = _conn.cursor().execute(mfr_query).fetch_pandas_all()
 
     # Get parent distributors using the PARENT_DISTRIBUTOR column
     parent_query = f"""
@@ -348,7 +361,7 @@ def get_filter_options(conn, territory_filter: str, year: int = None) -> dict:
         HAVING SUM(TRY_TO_DOUBLE(DOLLARS)) > 0
         ORDER BY SUM(TRY_TO_DOUBLE(DOLLARS)) DESC
     """
-    parent_df = conn.cursor().execute(parent_query).fetch_pandas_all()
+    parent_df = _conn.cursor().execute(parent_query).fetch_pandas_all()
 
     parents = []
     if not parent_df.empty:
@@ -367,3 +380,75 @@ def get_filter_options(conn, territory_filter: str, year: int = None) -> dict:
 def run_custom_query(conn, sql: str) -> pd.DataFrame:
     """Execute a custom SQL query and return results as DataFrame."""
     return conn.cursor().execute(sql).fetch_pandas_all()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_declining_accounts(_conn, territory_filter: str, threshold_pct: float = -20.0,
+                           min_dollars: float = 5000) -> pd.DataFrame:
+    """
+    Find accounts with significant YoY decline in the current period.
+    Compares current year-to-date vs same period last year.
+    Only includes accounts with at least $min_dollars last year (avoids noise).
+
+    Returns DataFrame with columns: DISTRIBUTORNAME, CY_DOLLARS, PY_DOLLARS, PCT_CHANGE
+    """
+    query = f"""
+        WITH current_year AS (
+            SELECT
+                DISTRIBUTORNAME,
+                SUM(TRY_TO_DOUBLE(DOLLARS)) AS CY_DOLLARS
+            FROM {ORDER_VIEW}
+            WHERE {territory_filter}
+              AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE())
+              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
+              AND (TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})
+            GROUP BY DISTRIBUTORNAME
+        ),
+        prior_year AS (
+            SELECT
+                DISTRIBUTORNAME,
+                SUM(TRY_TO_DOUBLE(DOLLARS)) AS PY_DOLLARS
+            FROM {ORDER_VIEW}
+            WHERE {territory_filter}
+              AND YEAR({PARSE_DATE}) = YEAR(CURRENT_DATE()) - 1
+              AND MONTH({PARSE_DATE}) <= MONTH(CURRENT_DATE())
+              AND (TRY_TO_DOUBLE(DOLLARS) IS NULL OR TRY_TO_DOUBLE(DOLLARS) < {MAX_LINE_DOLLARS})
+            GROUP BY DISTRIBUTORNAME
+        )
+        SELECT
+            COALESCE(cy.DISTRIBUTORNAME, py.DISTRIBUTORNAME) AS DISTRIBUTORNAME,
+            COALESCE(cy.CY_DOLLARS, 0) AS CY_DOLLARS,
+            py.PY_DOLLARS,
+            ROUND(((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / NULLIF(py.PY_DOLLARS, 0)) * 100, 1) AS PCT_CHANGE
+        FROM prior_year py
+        LEFT JOIN current_year cy ON cy.DISTRIBUTORNAME = py.DISTRIBUTORNAME
+        WHERE py.PY_DOLLARS >= {min_dollars}
+          AND ((COALESCE(cy.CY_DOLLARS, 0) - py.PY_DOLLARS) / NULLIF(py.PY_DOLLARS, 0)) * 100 <= {threshold_pct}
+        ORDER BY PCT_CHANGE ASC
+        LIMIT 10
+    """
+    try:
+        return _conn.cursor().execute(query).fetch_pandas_all()
+    except Exception:
+        return pd.DataFrame()
+
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_data_freshness(_conn) -> str | None:
+    """Get the most recent order date in the data to show freshness."""
+    query = f"""
+        SELECT MAX({PARSE_DATE}) AS latest_date
+        FROM {ORDER_VIEW}
+        WHERE {PARSE_DATE} IS NOT NULL
+    """
+    try:
+        df = _conn.cursor().execute(query).fetch_pandas_all()
+        if df.empty or df.iloc[0]["LATEST_DATE"] is None:
+            return None
+        latest = df.iloc[0]["LATEST_DATE"]
+        if hasattr(latest, 'strftime'):
+            return latest.strftime("%b %d, %Y")
+        return str(latest)
+    except Exception:
+        return None

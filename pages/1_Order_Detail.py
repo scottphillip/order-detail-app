@@ -6,6 +6,7 @@ import plotly.express as px
 from datetime import datetime
 
 from utils.auth import get_access_filter, get_access_display
+from utils.connection import get_nxt_connection
 from utils.data import (
     get_kpis, get_monthly_breakdown, get_top_manufacturers,
     get_distributor_parents, get_parent_stores, get_parent_monthly,
@@ -13,6 +14,7 @@ from utils.data import (
     get_available_years, PFG_PARENTS,
 )
 from utils.nl_query import ask_cortex_analyst
+from utils.export import excel_download_button
 
 st.set_page_config(page_title="Order Detail | Affinity Insights", page_icon="🍴",
                    layout="wide", initial_sidebar_state="expanded")
@@ -24,29 +26,8 @@ if "user" not in st.session_state:
 
 
 def get_snowflake_connection():
-    import snowflake.connector
-    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
-        st.session_state.sf_conn = snowflake.connector.connect(
-            account=st.secrets["snowflake"]["account"],
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            role=st.secrets["snowflake"]["role"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database="DB_NXT",
-        )
-    else:
-        try:
-            st.session_state.sf_conn.cursor().execute("SELECT 1")
-        except Exception:
-            st.session_state.sf_conn = snowflake.connector.connect(
-                account=st.secrets["snowflake"]["account"],
-                user=st.secrets["snowflake"]["user"],
-                password=st.secrets["snowflake"]["password"],
-                role=st.secrets["snowflake"]["role"],
-                warehouse=st.secrets["snowflake"]["warehouse"],
-                database="DB_NXT",
-            )
-    return st.session_state.sf_conn
+    """Get Snowflake connection (delegates to centralized module)."""
+    return get_nxt_connection()
 
 
 def send_email_via_graph(recipient_email: str, subject: str, body_html: str):
@@ -229,6 +210,7 @@ if not monthly_df.empty:
         display_df["Total Comm"] = display_df["Total Comm"].apply(lambda x: f"${x:,.0f}")
         display_df.columns = ["Month", "Dollars", "Cases", "Commission", "Orders"]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+    excel_download_button(monthly_df, "order_detail_monthly", "Export Monthly Data")
 else:
     st.info("No data available for the selected filters.")
 

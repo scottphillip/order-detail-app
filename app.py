@@ -3,11 +3,11 @@ Affinity Insights & Analytics - Landing Page
 Sales intelligence hub with navigation to analytics modules.
 """
 import streamlit as st
-import snowflake.connector
 from datetime import datetime
 
 from utils.auth import authenticate_user, get_access_filter, get_access_display
-from utils.data import get_kpis, get_available_years
+from utils.connection import get_nxt_connection
+from utils.data import get_kpis, get_available_years, get_data_freshness, get_declining_accounts
 
 # Page config
 st.set_page_config(
@@ -18,28 +18,9 @@ st.set_page_config(
 )
 
 
-def _create_snowflake_connection():
-    """Create a fresh Snowflake connection."""
-    return snowflake.connector.connect(
-        account=st.secrets["snowflake"]["account"],
-        user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
-        role=st.secrets["snowflake"]["role"],
-        warehouse=st.secrets["snowflake"]["warehouse"],
-        database="DB_NXT",
-    )
-
-
 def get_snowflake_connection():
-    """Get Snowflake connection with automatic reconnect on token expiry."""
-    if "sf_conn" not in st.session_state or st.session_state.sf_conn is None:
-        st.session_state.sf_conn = _create_snowflake_connection()
-    else:
-        try:
-            st.session_state.sf_conn.cursor().execute("SELECT 1")
-        except Exception:
-            st.session_state.sf_conn = _create_snowflake_connection()
-    return st.session_state.sf_conn
+    """Get Snowflake connection (delegates to centralized module)."""
+    return get_nxt_connection()
 
 
 # =====================================================
@@ -110,16 +91,34 @@ territory_filter = get_access_filter(user)
 with st.sidebar:
     st.markdown(f"### {user['DISPLAY_NAME']}")
     st.caption(get_access_display(user))
+    # Data freshness badge
+    freshness = get_data_freshness(conn)
+    if freshness:
+        st.markdown(
+            f'<div style="background:#1B4F72; color:white; padding:6px 12px; '
+            f'border-radius:6px; font-size:12px; margin:8px 0;">'
+            f'Data through: <strong>{freshness}</strong></div>',
+            unsafe_allow_html=True
+        )
     st.markdown("---")
     st.markdown("#### Navigation")
+    st.caption("Internal Sales")
     if st.button("Order Detail", use_container_width=True):
         st.switch_page("pages/1_Order_Detail.py")
     if st.button("Manufacturer Compare", use_container_width=True):
         st.switch_page("pages/2_Manufacturer_Compare.py")
     if st.button("Period Compare", use_container_width=True):
         st.switch_page("pages/3_Period_Compare.py")
+    st.caption("Partner Data")
     if st.button("Scorecard Analytics", use_container_width=True):
         st.switch_page("pages/4_Scorecard_Analytics.py")
+    if st.button("Contract Intelligence", use_container_width=True):
+        st.switch_page("pages/5_Contract_Intelligence.py")
+    st.caption("Cross-Source")
+    if st.button("Reconciliation", use_container_width=True):
+        st.switch_page("pages/6_Reconciliation.py")
+    if st.button("Sales Call Prep", use_container_width=True):
+        st.switch_page("pages/7_Sales_Call_Prep.py")
     st.markdown("---")
     if st.button("Sign Out"):
         del st.session_state.user
@@ -146,62 +145,151 @@ kpi2.metric("Total Orders", f"{kpis['orders']:,}")
 kpi3.metric("Total Cases", f"{kpis['qty']:,.0f}")
 kpi4.metric("Commission", f"${kpis['comm']:,.0f}")
 
-st.markdown("---")
-st.markdown("### What would you like to explore?")
-st.markdown("")
+# ─── Declining Accounts Alert ───
+declining_df = get_declining_accounts(conn, territory_filter)
+if not declining_df.empty:
+    st.markdown("---")
+    st.markdown("### ⚠ Accounts Needing Attention")
+    st.caption("Customers with >20% YoY decline (year-to-date vs same period last year)")
+    for _, row in declining_df.head(5).iterrows():
+        pct = row["PCT_CHANGE"]
+        cy = row["CY_DOLLARS"]
+        py = row["PY_DOLLARS"]
+        name = row["DISTRIBUTORNAME"]
+        st.markdown(
+            f'<div style="background:#FFF3E0; border-left:4px solid #E65100; '
+            f'padding:10px 15px; margin:5px 0; border-radius:4px;">'
+            f'<strong>{name}</strong> — '
+            f'<span style="color:#E65100;">{pct:+.1f}%</span> '
+            f'<span style="color:#666;">(${cy:,.0f} vs ${py:,.0f} last year)</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
-# Navigation cards
-col1, col2 = st.columns(2)
+# ═══════════════════════════════════════════════════════════════
+# NAVIGATION — GROUPED BY DATA SOURCE
+# ═══════════════════════════════════════════════════════════════
+
+st.markdown("---")
+
+# ─── Section 1: Internal Sales (NXT) ───
+st.markdown("""
+<div style="margin-bottom: 8px;">
+    <span style="color: #F5921E; font-size: 16px; font-weight: 600; letter-spacing: 1px;">YOUR SALES</span>
+    <span style="color: #888; font-size: 12px; margin-left: 8px;">From NXT Internal System</span>
+</div>
+""", unsafe_allow_html=True)
+
+col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
-                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">Order Detail</h3>
-        <p style="color: #CCCCCC;">Explore YTD sales by manufacturer, distributor parent, 
-        territory, and category. Drill into individual store performance.</p>
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #F5921E;">
+        <h4 style="color: #F5921E; margin-top: 0;">Order Detail</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">YTD sales by manufacturer, distributor, 
+        territory. Drill into store-level performance.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("Open Order Detail →", use_container_width=True, key="card_order"):
+    if st.button("Open →", use_container_width=True, key="card_order"):
         st.switch_page("pages/1_Order_Detail.py")
 
 with col2:
     st.markdown("""
-    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
-                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">Manufacturer Compare</h3>
-        <p style="color: #CCCCCC;">Compare two or more manufacturers side by side — 
-        dollars, cases, commission, and monthly trends overlaid.</p>
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #F5921E;">
+        <h4 style="color: #F5921E; margin-top: 0;">Manufacturer Compare</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">Side-by-side comparison — dollars, cases, 
+        commission, monthly trends overlaid.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("Open Comparison →", use_container_width=True, key="card_compare"):
+    if st.button("Open →", use_container_width=True, key="card_compare"):
         st.switch_page("pages/2_Manufacturer_Compare.py")
-
-col3, col4 = st.columns(2)
 
 with col3:
     st.markdown("""
-    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
-                color: white; min-height: 200px; border-left: 5px solid #F5921E;">
-        <h3 style="color: #F5921E; margin-top: 0;">Period Compare</h3>
-        <p style="color: #CCCCCC;">Compare sales across time periods — year over year, 
-        month over month, or custom date ranges with change indicators.</p>
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #F5921E;">
+        <h4 style="color: #F5921E; margin-top: 0;">Period Compare</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">Year-over-year, quarter-over-quarter, or 
+        custom date range comparisons.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("Open Period Compare →", use_container_width=True, key="card_period"):
+    if st.button("Open →", use_container_width=True, key="card_period"):
         st.switch_page("pages/3_Period_Compare.py")
+
+st.markdown("")
+
+# ─── Section 2: Partner Data (Manufacturer-Shared) ───
+st.markdown("""
+<div style="margin-bottom: 8px;">
+    <span style="color: #4CAF50; font-size: 16px; font-weight: 600; letter-spacing: 1px;">PARTNER DATA</span>
+    <span style="color: #888; font-size: 12px; margin-left: 8px;">Manufacturer-Shared Scorecards & Contracts</span>
+</div>
+""", unsafe_allow_html=True)
+
+col4, col5 = st.columns(2)
 
 with col4:
     st.markdown("""
-    <div style="background: #2D2D2D; padding: 30px; border-radius: 12px; 
-                color: white; min-height: 200px; border-left: 5px solid #4CAF50;">
-        <h3 style="color: #4CAF50; margin-top: 0;">Scorecard Analytics</h3>
-        <p style="color: #CCCCCC;">Deep analytics across all 57 manufacturer clients — 
-        trends, predictions, failing item detection, category breakdowns, and anomaly alerts.</p>
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #4CAF50;">
+        <h4 style="color: #4CAF50; margin-top: 0;">Scorecard Analytics</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">57 manufacturer clients — trends, predictions, 
+        failing items, category breakdowns, anomaly detection.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("Open Scorecard Analytics →", use_container_width=True, key="card_scorecard"):
+    if st.button("Open →", use_container_width=True, key="card_scorecard"):
         st.switch_page("pages/4_Scorecard_Analytics.py")
+
+with col5:
+    st.markdown("""
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #9C27B0;">
+        <h4 style="color: #9C27B0; margin-top: 0;">Contract Intelligence</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">Upload contracts, extract commission rates with AI, 
+        compare old vs new terms against real sales.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Open →", use_container_width=True, key="card_contracts"):
+        st.switch_page("pages/5_Contract_Intelligence.py")
+
+st.markdown("")
+
+# ─── Section 3: Cross-Source Insights ───
+st.markdown("""
+<div style="margin-bottom: 8px;">
+    <span style="color: #2196F3; font-size: 16px; font-weight: 600; letter-spacing: 1px;">CROSS-SOURCE INSIGHTS</span>
+    <span style="color: #888; font-size: 12px; margin-left: 8px;">Where Internal Meets Partner Data</span>
+</div>
+""", unsafe_allow_html=True)
+
+col6, col7 = st.columns(2)
+
+with col6:
+    st.markdown("""
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #2196F3;">
+        <h4 style="color: #2196F3; margin-top: 0;">Reconciliation</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">Compare your internal numbers vs manufacturer 
+        scorecard reports. Find gaps, missing orders, and discrepancies.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Open →", use_container_width=True, key="card_recon"):
+        st.switch_page("pages/6_Reconciliation.py")
+
+with col7:
+    # Sales Call Prep - inline quick action
+    st.markdown("""
+    <div style="background: #2D2D2D; padding: 24px; border-radius: 10px; 
+                color: white; min-height: 160px; border-left: 4px solid #FF9800;">
+        <h4 style="color: #FF9800; margin-top: 0;">Sales Call Prep</h4>
+        <p style="color: #CCCCCC; font-size: 13px;">Quick customer/manufacturer snapshot — 
+        YTD sales, trending direction, top items, last order, commission rate.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Open →", use_container_width=True, key="card_prep"):
+        st.switch_page("pages/7_Sales_Call_Prep.py")
 
 st.markdown("---")
 st.caption("Affinity Group | Insights & Analytics | Powered by Snowflake + Cortex AI")

@@ -12,6 +12,7 @@ import numpy as np
 from datetime import datetime
 
 from utils.scorecard_auth import get_scorecard_access_filter
+from utils.connection import get_csm_connection
 from utils.scorecard_data import (
     get_scorecard_years, get_scorecard_clients, get_scorecard_categories,
     get_scorecard_regions, get_scorecard_kpis, get_scorecard_kpis_prior_year,
@@ -24,6 +25,7 @@ from utils.scorecard_data import (
     SCORECARD_TABLE,
 )
 from utils.auth import get_access_display
+from utils.export import excel_download_button
 
 st.set_page_config(
     page_title="Scorecard Analytics | Affinity Insights",
@@ -39,29 +41,8 @@ if "user" not in st.session_state:
 
 
 def get_snowflake_connection():
-    import snowflake.connector
-    if "sf_conn_csm" not in st.session_state or st.session_state.sf_conn_csm is None:
-        st.session_state.sf_conn_csm = snowflake.connector.connect(
-            account=st.secrets["snowflake"]["account"],
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            role=st.secrets["snowflake"]["role"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database="DB_PROD_CSM",
-        )
-    else:
-        try:
-            st.session_state.sf_conn_csm.cursor().execute("SELECT 1")
-        except Exception:
-            st.session_state.sf_conn_csm = snowflake.connector.connect(
-                account=st.secrets["snowflake"]["account"],
-                user=st.secrets["snowflake"]["user"],
-                password=st.secrets["snowflake"]["password"],
-                role=st.secrets["snowflake"]["role"],
-                warehouse=st.secrets["snowflake"]["warehouse"],
-                database="DB_PROD_CSM",
-            )
-    return st.session_state.sf_conn_csm
+    """Get Snowflake connection (delegates to centralized module)."""
+    return get_csm_connection()
 
 
 conn = get_snowflake_connection()
@@ -203,6 +184,7 @@ with tab1:
                 margin=dict(t=10, b=30)
             )
             st.plotly_chart(fig, use_container_width=True)
+            excel_download_button(trend_df, "scorecard_trend", "Export Trend Data")
         else:
             st.info("No trend data available for selected filters.")
 
